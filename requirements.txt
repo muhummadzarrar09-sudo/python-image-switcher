@@ -1,0 +1,13 @@
+# Core
+customtkinter>=5.2.0
+Pillow>=10.0.0
+# SVG rasterization (vector -> raster)
+cairosvg>=2.7.0
+# Modern formats
+pillow-heif>=0.14.0
+# AVIF - Pillow >=10.1 has built-in, but plugin fallback
+pillow-avif-plugin>=1.4.0 ; python_version < "3.12"
+# PDF handling (optional, for viewer and conversion)
+PyMuPDF>=1.23.0
+# Build
+pyinstaller>=6.0

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "python-image-switcher"
+version = "1.0.0"
+description = "Universal Image Converter - Convert ANY image type to ANY other with searchable dropdown, acceptance gate, dual viewer, SVG support, EXE installer"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Image Switcher Team"}
+]
+dependencies = [
+    "customtkinter>=5.2.0",
+    "Pillow>=10.0.0",
+    "cairosvg>=2.7.0",
+    "pillow-heif>=0.14.0",
+    "PyMuPDF>=1.23.0",
+]
+optional-dependencies = { dev = ["pyinstaller>=6.0", "pillow-avif-plugin"] }
+
+[project.scripts]
+image-switcher = "src.app:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]

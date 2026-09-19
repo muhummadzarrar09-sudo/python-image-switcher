@@ -1,0 +1,54 @@
+name: Deploy Landing Page to GitHub Pages
+
+on:
+  push:
+    branches: [ main, arena/01a0b742-python-image-switcher ]
+    paths:
+      - 'website/**'
+      - 'assets/**'
+      - 'mockups/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Prepare site
+        run: |
+          mkdir -p _site
+          cp -r website/* _site/
+          mkdir -p _site/assets
+          cp -r assets/* _site/assets/ || true
+          mkdir -p _site/mockups
+          cp -r mockups/* _site/mockups/ || true
+          # Fix relative paths for GitHub Pages (website expects ../assets)
+          sed -i 's|\.\./assets/|assets/|g' _site/index.html
+          sed -i 's|\.\./mockups/|mockups/|g' _site/index.html
+          ls -lh _site/
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '_site'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

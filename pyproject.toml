@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "python-image-switcher"
-version = "1.0.0"
-description = "Universal Image Converter - Convert ANY image type to ANY other with searchable dropdown, acceptance gate, dual viewer, SVG support, EXE installer"
+version = "3.2.0"
+description = "Universal Image Converter V2.4 RHHHAAAAA - 50+ formats, batch, presets, AI, 3D Studio, F11 fullscreen, taskbar bounds (work area), polished buttons/text, glassmorphism"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
@@ -15,11 +15,19 @@ authors = [
 dependencies = [
     "customtkinter>=5.2.0",
     "Pillow>=10.0.0",
+    "numpy>=1.24.0",
     "cairosvg>=2.7.0",
     "pillow-heif>=0.14.0",
     "PyMuPDF>=1.23.0",
+    "requests>=2.28.0",
+    "trimesh>=4.0.0",
 ]
-optional-dependencies = { dev = ["pyinstaller>=6.0", "pillow-avif-plugin"] }
+optional-dependencies = { 
+    dev = ["pyinstaller>=6.0", "pillow-avif-plugin"],
+    dragdrop = ["windnd>=1.0.4"],
+    ai = ["rembg>=2.0.0", "onnxruntime>=1.16.0"],
+    all = ["pyinstaller>=6.0", "windnd>=1.0.4", "trimesh>=4.0.0", "rembg>=2.0.0", "onnxruntime>=1.16.0", "pillow-avif-plugin"]
+}
 
 [project.scripts]
 image-switcher = "src.app:main"

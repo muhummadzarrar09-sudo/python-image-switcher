@@ -1,10 +1,10 @@
-# Build Guide - EXE + Setup Installer
+# Build Guide - EXE + Setup Installer V2 RHHHAAAAA
 
 ## Prerequisites (Windows Recommended)
 
-- Python 3.9+ (3.11 recommended)
+- Python 3.9+ (3.11 recommended, 3.14 works but bleeding edge)
 - Git
-- Windows 10/11 for EXE build (Linux/Mac can build but installer is Windows)
+- Windows 10/11 for EXE build
 
 ## Step 1: Install Dependencies
 
@@ -12,151 +12,172 @@
 pip install -r requirements.txt
 ```
 
-For full format support:
+Full:
 ```bash
 pip install pillow-heif pillow-avif-plugin PyMuPDF cairosvg customtkinter
 ```
 
-## Step 2: Run App (Dev)
+## Step 2: Run App V2
 
 ```bash
 python src/app.py
-# or
-python main.py
+# V2 has 3 tabs: Single, Batch 🔥, Tools
+# Tools tab has pinger + context menu info + landing page
 ```
 
-## Step 3: Build EXE with PyInstaller
+Test pinger:
+```bash
+python tools/pinger.py
+python tools/pinger.py --watch --interval 60
+powershell -File tools/pinger.ps1 -Watch
+```
 
-### Option A: OneFile (single EXE, easy to share)
+## Step 3: Build EXE
+
+### OneFile
 ```bash
 python build_exe.py --onefile
 ```
-Output: `dist/ImageSwitcher.exe` (~80-120 MB, includes all deps)
+Output: `dist/ImageSwitcher.exe` (~80-120 MB)
 
-### Option B: OneDir (folder, fast startup)
+### OneDir
 ```bash
 python build_exe.py --onedir
 ```
-Output: `dist/ImageSwitcher/ImageSwitcher.exe` + dependencies folder
 
-### Manual PyInstaller (if script fails)
-
+Manual:
 ```bash
 pyinstaller --onefile --windowed --name=ImageSwitcher --icon=assets/icon.ico --add-data="assets;assets" --collect-all=customtkinter --collect-all=cairosvg --hidden-import=PIL --hidden-import=cairosvg --hidden-import=pillow_heif --hidden-import=fitz src/app.py
 ```
 
-### Troubleshooting Build
+Troubleshooting:
+- **cairo not found**: Normal on Windows without GTK, SVG raster will fail but app works for raster. Install GTK runtime if needed.
+- **PyMuPDF not found**: Renamed to pymupdf, but bundled anyway.
 
-- **Missing tkinter**: On Linux, `sudo apt install python3-tk`
-- **Missing cairo**: On Windows, cairosvg bundles needed DLLs via PyInstaller. If fails, install GTK runtime: https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer
-- **libpython not found (Linux)**: `sudo apt install libpython3.11`
-- **Large EXE**: Normal, includes Pillow, CustomTkinter, Cairo, etc. Use UPX to compress: download UPX and add `--upx-dir=/path/to/upx`
+## Step 4: Install / Distribute V2
 
-## Step 4: Build Setup Installer (Windows Setup.exe)
+### Option A (recommended): PowerShell installer V2 - `install.ps1`
 
-This creates a professional installer like any real Windows app.
+Full native installer, no extra tools, PowerShell 5.1 built-in.
 
-1. Install **Inno Setup 6**: https://jrsoftware.org/download.php/is.exe
-2. (Optional) Install Inno Setup VSCode extension
-3. Compile:
+**NEW V2: Context Menu + File Associations**
 
-**Via GUI:**
-- Open `installer.iss` in Inno Setup Compiler
-- Click Build → Compile
-- Output: `dist/ImageSwitcher-Setup-1.0.0.exe`
+```powershell
+# Basic - auto-detects dist\ImageSwitcher.exe
+powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
 
-**Via Command Line (if iscc in PATH):**
-```bash
-iscc installer.iss
+# V2 FULL POWER - RHHHAAAAA mode
+powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -ContextMenu -FileAssociations -Force
+
+# All users + context menu (UAC)
+powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -ContextMenu -FileAssociations -MachineScope
+
+# From GitHub release
+powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Release -Sha256 <hash> -ContextMenu
 ```
 
-**What the installer does:**
-- Shows welcome, license (LICENSE.txt)
-- Asks install dir (default Program Files)
-- Copies EXE or folder
-- Creates Start Menu shortcut
-- Optional Desktop icon
-- Creates uninstaller in Control Panel
-- Optional: associate image formats
+**What it does V2:**
+- Per-user `%LOCALAPPDATA%\Programs\Image Switcher` (no admin) or Program Files with `-MachineScope` + auto UAC relaunch
+- SHA-256 verification
+- Upgrade with timestamped backup, closes running app
+- Desktop + Start Menu shortcuts
+- Uninstall entry in Settings > Apps
+- Generates `Uninstall-ImageSwitcher.ps1/.bat`
+- **File associations** for 13 exts (`-FileAssociations`)
+- **NEW: Context menu** (`-ContextMenu`):
+  - `SystemFileAssociations\image\shell\ImageSwitcher` → Right-click image → Convert with Image Switcher
+  - Per-extension handlers for each of 13 formats
+  - `Directory\shell\ImageSwitcherBatch` → Right-click folder → Convert images in folder
+  - `Directory\Background\shell\ImageSwitcherBatch` → Right-click inside folder
+- Launches app when done
 
-### Customizing installer.iss
+**Switches V2:**
 
-Edit these lines in `installer.iss`:
-```
-#define MyAppVersion "1.0.0"  ; change version
-#define MyAppPublisher "Your Name"
-OutputBaseFilename=ImageSwitcher-Setup-{#MyAppVersion}
-```
+| Switch | Effect |
+|---|---|
+| `-ReleaseUrl <url>` | Download specific EXE |
+| `-Release` | Latest release ImageSwitcher.exe |
+| `-Sha256 <hash>` | Verify checksum |
+| `-InstallDir <path>` | Custom location |
+| `-MachineScope` | All-users Program Files |
+| `-FileAssociations` | Register PNG/JPG/WEBP/... |
+| `-ContextMenu` | **NEW** Explorer context menu image + folder |
+| `-NoDesktopIcon` / `-NoStartMenu` | Skip shortcuts |
+| `-NoLaunch` | Don't start app |
+| `-NoBackup` | No backup on upgrade |
+| `-Force` / `-Quiet` | No prompts |
+| `-Version <ver>` | Override version |
 
-Add more file associations in [Tasks] and [Registry] sections if needed.
+### Option B: Classic GUI Setup.exe via Inno Setup
 
-## Step 5: Distribute
+1. Install Inno Setup 6: https://jrsoftware.org/download.php/is.exe
+2. `iscc installer.iss`
+3. Output: `dist/ImageSwitcher-Setup-1.1.0.exe`
+
+## Step 5: Distribute V2
 
 You now have:
-- `dist/ImageSwitcher.exe` - portable, no install needed, just run
-- `dist/ImageSwitcher-Setup-1.0.0.exe` - full installer, professional
+- `dist/ImageSwitcher.exe` - portable
+- `install.ps1` - V2 with context menu support
+- `dist/ImageSwitcher-Setup-1.1.0.exe` - classic GUI (optional)
+- `website/index.html` - landing page (deploy to GitHub Pages)
+- `tools/pinger.py` + `tools/pinger.ps1` - update checker
 
-Share either. Setup is recommended for end users.
+For GitHub Releases: upload `ImageSwitcher.exe` + SHA-256 + `install.ps1` as assets.
 
-## Linux / Mac Build
+Users install with:
+```powershell
+.\install.ps1 -Release -Sha256 <hash> -ContextMenu -FileAssociations
+```
 
-Same PyInstaller command works, produces:
-- Linux: `dist/ImageSwitcher` (binary)
-- Mac: `dist/ImageSwitcher.app` (use --windowed --onedir for .app bundle)
+## Step 6: Landing Page
 
-For Mac DMG installer:
 ```bash
-# Install create-dmg
-brew install create-dmg
-create-dmg --volname "Image Switcher" --window-pos 200 120 --window-size 600 400 --icon-size 100 --app-drop-link 425 120 dist/ImageSwitcher.dmg dist/ImageSwitcher.app
+# Just open in browser, Tailwind CDN, no build
+start website/index.html
+# Or serve
+python -m http.server 8000 --directory website
 ```
 
-## CI/CD (GitHub Actions)
+Deploy to GitHub Pages: push `website/` content to `gh-pages` branch or set Pages source to `/website` folder.
 
-Example workflow to auto-build EXE on push:
+## Step 7: Pinger Usage
 
-```yaml
-name: Build EXE
-on: [push]
-jobs:
-  build:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with: {python-version: '3.11'}
-      - run: pip install -r requirements.txt pyinstaller
-      - run: python build_exe.py --onefile
-      - uses: actions/upload-artifact@v3
-        with: {name: exe, path: dist/}
+```bash
+# Check once
+python tools/pinger.py
+# Watch mode with toast
+python tools/pinger.py --watch --interval 60
+# JSON output for CI
+python tools/pinger.py --json
+# PowerShell with toast
+powershell -File tools/pinger.ps1 -Watch -Interval 60
 ```
 
-## Testing the EXE
+In-app: Header shows live banner, Tools tab has buttons.
 
-1. Run `dist/ImageSwitcher.exe` on a clean Windows VM (no Python installed) to ensure it works standalone
-2. Test conversions:
-   - PNG → JPG (alpha handling)
-   - SVG → PNG (rasterization)
-   - PNG → SVG (embedding)
-   - WEBP → AVIF (modern)
-3. Check viewer shows old vs new
-4. Test searchable dropdown: type "trans" should show PNG, WEBP, SVG, etc.
+## Testing V2
 
-## Size Optimization (Optional)
+1. EXE runs on clean Windows VM
+2. Single tab: PNG → JPG, SVG → PNG, PNG → SVG
+3. Batch tab: Select folder with 10 images, target WEBP, convert all
+4. Context menu: Right-click image → Convert with Image Switcher (after install -ContextMenu)
+5. Pinger: `python tools/pinger.py` shows remote main SHA
+6. Searchable dropdown: type "trans" shows PNG, WEBP, SVG
+7. Viewer: old vs new with checkerboard
+8. Landing page: open `website/index.html`
 
-- Use `--exclude-module` for unused formats if you want smaller EXE (but we want ALL formats)
-- Use UPX compression
-- Use `pip install pyinstaller[encryption]` for bytecode encryption
+## Final Checklist V2
 
-## Final Checklist Before Release
-
-- [ ] App runs via `python src/app.py`
-- [ ] `python src/cli.py list` shows 38+ formats
-- [ ] `python src/cli.py gate png jpeg` shows yellow with warnings
+- [ ] App runs via `python src/app.py` - 3 tabs visible
+- [ ] Single conversion works
+- [ ] Batch mode scans folder and converts
+- [ ] Pinger shows main status
+- [ ] Context menu installs and uninstalls
 - [ ] EXE builds and runs on clean Windows
-- [ ] Setup installer builds and installs/uninstalls correctly
-- [ ] Icons show correctly
-- [ ] Viewer shows old and new images
-- [ ] Search inside dropdown works
+- [ ] install.ps1 V2 with -ContextMenu works
+- [ ] New 3D icon shows in EXE and shortcuts
+- [ ] Landing page opens and looks neon
+- [ ] Mockup present in mockups/
 
-You are done! You have a COMPLETE app, not just a script.
+You are done V2 RHHHAAAAA!

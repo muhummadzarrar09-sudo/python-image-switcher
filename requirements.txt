@@ -1,13 +1,35 @@
-# Core
+# Core - V2.3 RHHHAAAAA Offline + 3D Studio
 customtkinter>=5.2.0
 Pillow>=10.0.0
+numpy>=1.24.0
 # SVG rasterization (vector -> raster)
 cairosvg>=2.7.0
 # Modern formats
 pillow-heif>=0.14.0
-# AVIF - Pillow >=10.1 has built-in, but plugin fallback
 pillow-avif-plugin>=1.4.0 ; python_version < "3.12"
-# PDF handling (optional, for viewer and conversion)
 PyMuPDF>=1.23.0
 # Build
 pyinstaller>=6.0
+
+# V2.2 UX - Drag & Drop (Windows, offline, no cloud) - FIXED for Python 3.14
+# Latest windnd on PyPI is 1.0.7, not 1.1.6 - fixed suiiiiiii
+windnd>=1.0.4 ; sys_platform == "win32"
+
+# V2.3 3D Studio - Personalised 3D Maker (NOT Blender, specialized)
+# 100% offline, no cloud
+trimesh>=4.0.0
+# Optional for better 3D (may not have 3.14 wheels yet)
+# open3d>=0.17.0 ; python_version < "3.13"
+# moderngl for real 3D viewer (optional)
+# moderngl>=5.10.0
+
+# V2 AI - Optional, offline after download - WORKS on Python 3.14 too vrooo! Tested 3.14-64 success
+# rembg needs onnxruntime backend - install cpu version
+rembg>=2.0.0
+onnxruntime>=1.16.0
+# For CPU - use: pip install "rembg[cpu]" which pulls onnxruntime
+# For GPU - use: pip install "rembg[gpu]" + onnxruntime-gpu
+# realesrgan optional heavy
+
+# Pinger + utils (offline-friendly)
+requests>=2.28.0

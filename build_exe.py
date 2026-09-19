@@ -97,9 +97,11 @@ def build(onefile=True, windowed=True, clean=True):
         print(f"Folder build: {folder}")
 
     print("\nNext steps for SETUP installer:")
-    print("1. Install Inno Setup (https://jrsoftware.org/isinfo.php)")
-    print("2. Open installer.iss and compile to create Setup.exe")
-    print("Or run: iscc installer.iss (if Inno Setup in PATH)")
+    print("Option A (recommended, no extra tools needed) - PowerShell installer:")
+    print("    powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1")
+    print("    (auto-detects this fresh build; add -FileAssociations / -MachineScope as needed)")
+    print("Option B (classic GUI Setup.exe): install Inno Setup 6, then run:")
+    print("    iscc installer.iss")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

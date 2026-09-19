@@ -1,0 +1,63 @@
+name: Build EXE V2 RHHHAAAAA
+
+on:
+  push:
+    branches: [ main, arena/* ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt pyinstaller
+          pip install pillow-heif
+          # Optional AI (best effort)
+          pip install rembg || echo "rembg optional"
+
+      - name: Build EXE OneFile
+        run: |
+          python build_exe.py --onefile
+
+      - name: Check EXE
+        run: |
+          dir dist
+          if (Test-Path dist/ImageSwitcher.exe) { echo "EXE exists" } else { exit 1 }
+
+      - name: Test Pinger
+        run: |
+          python tools/pinger.py --json
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: ImageSwitcher-EXE-V2
+          path: dist/ImageSwitcher.exe
+          retention-days: 30
+
+      - name: Upload full dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: ImageSwitcher-dist
+          path: dist/
+          retention-days: 7
+
+  build-landing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check landing page
+        run: |
+          ls -lh website/
+          ls -lh assets/icon-v2-3d.png || true
+          echo "Landing page ready"

@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Image Switcher V3.2 — Resizable • Acrylic • Ripple • Pro Dark Studio</title>
+<meta name="description" content="V3.2 Pro Dark Studio — Resizable sidebar 200-400px, Windows 11 Mica/Acrylic blur, ripple micro-interactions, glass empty states. 50+ formats, 100% offline.">
+<link rel="icon" href="../assets/icon-v2-3d.png">
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      fontFamily: { sans: ['Inter', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+      colors: {
+        bg: '#0a0a0b',
+        sidebar: '#111113',
+        card: '#161618',
+        card2: '#1e1e22',
+        border: '#232326',
+        text: '#e4e4e7',
+        dim: '#71717a',
+        neon: '#4ade80',
+      }
+    }
+  }
+}
+</script>
+<style>
+  body { font-family: Inter, sans-serif; background: #0a0a0b; color: #e4e4e7; }
+  .glass { backdrop-filter: blur(24px); background: rgba(22,22,24,0.8); border: 1px solid #232326; }
+  .sidebar { background: #111113; border-right: 1px solid #232326; }
+  .card { background: #161618; border: 1px solid #232326; }
+  .cmd { background: #1e1e22; border: 1px solid #232326; }
+  .glow { box-shadow: 0 0 60px rgba(74,222,128,0.08); }
+  .grid-dot { background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.04) 1px, transparent 0); background-size: 32px 32px; }
+  * { scrollbar-width: thin; scrollbar-color: #232326 transparent; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-thumb { background: #232326; border-radius: 3px; }
+  .animate-in { animation: in 0.6s cubic-bezier(0.16,1,0.3,1); }
+  @keyframes in { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
+</style>
+</head>
+<body class="antialiased overflow-x-hidden selection:bg-white selection:text-black">
+<!-- Custom Titlebar V3.2 -->
+<div class="h-8 bg-card border-b border-border flex items-center px-3 text-[11px] font-medium text-dim gap-2 sticky top-0 z-[100]">
+  <div class="flex gap-1.5"><div class="w-3 h-3 rounded-full bg-[#ff5f56]"></div><div class="w-3 h-3 rounded-full bg-[#ffbd2e]"></div><div class="w-3 h-3 rounded-full bg-[#27c93f]"></div></div>
+  <span class="ml-4">Image Switcher V3.2 — Pro Dark Studio • Resizable • Acrylic • Ripple • Offline</span>
+  <div class="ml-auto flex items-center gap-2">
+    <span class="px-2 py-0.5 rounded bg-white text-black font-bold text-[10px]">V3.2</span>
+    <span class="text-[10px]">Resizable • Mica • Ripple • 100% Local</span>
+  </div>
+</div>
+
+<div class="flex min-h-[calc(100vh-2rem)]">
+  <!-- Sidebar like App V3.2 with resize handle visual -->
+  <aside class="sidebar w-[260px] hidden lg:flex flex-col p-3 sticky top-8 h-[calc(100vh-2rem)] relative">
+    <button class="cmd h-9 rounded-[10px] px-3 flex items-center justify-between text-[13px] text-dim hover:text-text transition w-full">
+      <span class="flex items-center gap-2">🔍 Search or jump to... </span><span class="text-[10px] px-1.5 py-0.5 rounded bg-card border border-border">⌘K</span>
+    </button>
+    <div class="mt-6">
+      <div class="text-[10px] font-bold tracking-widest text-dim/60 px-2 mb-2">CONVERT</div>
+      <div class="space-y-1">
+        <div class="h-10 rounded-[10px] bg-card2 border border-border px-3 flex items-center gap-2 text-[13px] font-semibold text-text">🖼️ Single</div>
+        <div class="h-10 rounded-[10px] hover:bg-white/[0.04] px-3 flex items-center gap-2 text-[13px] font-medium text-dim">🔥 Batch</div>
+        <div class="h-10 rounded-[10px] hover:bg-white/[0.04] px-3 flex items-center gap-2 text-[13px] font-medium text-dim">✨ Presets</div>
+        <div class="h-10 rounded-[10px] hover:bg-white/[0.04] px-3 flex items-center gap-2 text-[13px] font-medium text-dim">🤖 AI Tools</div>
+        <div class="h-10 rounded-[10px] hover:bg-white/[0.04] px-3 flex items-center gap-2 text-[13px] font-medium text-dim">📦 3D Studio</div>
+      </div>
+      <div class="h-px bg-border my-4 mx-2"></div>
+      <div class="text-[10px] font-bold tracking-widest text-dim/60 px-2 mb-2">SYSTEM</div>
+      <div class="h-10 rounded-[10px] hover:bg-white/[0.04] px-3 flex items-center gap-2 text-[13px] font-medium text-dim">🔧 Tools</div>
+    </div>
+    <div class="mt-auto">
+      <div class="card rounded-[12px] p-3 border-neon/20">
+        <div class="text-[11px] font-bold text-neon">V3.2 • Resizable • Acrylic</div>
+        <div class="text-[10px] text-dim mt-1">Drag handle • Mica blur • Ripple • 100% offline</div>
+      </div>
+      <div class="text-[9px] text-dim/60 mt-3 px-2 leading-relaxed">F11 Fullscreen • Shift+F11 Bounds • Ctrl+K Cmd • Ctrl+T Theme • Ctrl+Shift+A Acrylic • Drag resize</div>
+    </div>
+    <div class="absolute top-0 right-0 w-1 h-full bg-neon/0 hover:bg-neon/40 cursor-col-resize transition"></div>
+  </aside>
+
+  <!-- Main -->
+  <main class="flex-1 min-w-0">
+    <!-- Header V3.2 -->
+    <header class="h-[56px] bg-card border-b border-border flex items-center px-6 justify-between sticky top-8 z-40">
+      <div class="flex items-center gap-3">
+        <img src="../assets/icon-v2-3d.png" class="w-8 h-8 rounded-lg glow" alt="">
+        <div><div class="font-bold text-[14px] tracking-tight leading-none">IMAGE SWITCHER</div><div class="text-[10px] text-dim font-bold">Pro Dark Studio • V3.2 • Resizable • Acrylic • Ripple</div></div>
+        <div class="hidden md:flex items-center gap-2 ml-6">
+          <span class="text-[11px] px-2 py-1 rounded bg-card2 border border-border text-dim">v3.2.0</span>
+          <span class="text-[11px] text-neon">✓ Resizable • Mica • Ripple</span>
+          <span class="cmd px-2 py-1 rounded-[8px] text-[10px] text-dim flex gap-1"><span>⌘K</span> Command</span>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="h-8 px-3 rounded-[8px] bg-card2 border border-border text-[11px] font-bold">⛶ F11</button>
+        <button class="h-8 px-3 rounded-[8px] bg-card2 border border-border text-[11px] font-bold">🗖 Bounds</button>
+        <button class="h-8 px-3 rounded-[8px] bg-neon text-black border border-neon text-[11px] font-bold">✨ Acrylic</button>
+        <button class="h-8 w-8 rounded-[8px] bg-card2 border border-border">🌓</button>
+        <button class="h-8 w-8 rounded-[8px] bg-card2 border border-border">🪟</button>
+        <button class="h-8 w-8 rounded-[8px] bg-card2 border border-border">⚙️</button>
+        <button id="themeToggle" class="h-8 w-8 rounded-[8px] bg-white text-black font-bold">☀️</button>
+      </div>
+    </header>
+
+    <!-- Hero V3.2 -->
+    <section class="px-6 md:px-10 py-12 grid-dot relative overflow-hidden">
+      <div class="absolute inset-0 bg-gradient-to-b from-white/[0.02] via-transparent to-transparent pointer-events-none"></div>
+      <div class="max-w-[1200px] relative animate-in">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-card border border-border text-[11px] font-mono"><span class="w-2 h-2 rounded-full bg-neon animate-pulse"></span> V3.2 — RESIZABLE SIDEBAR • ACRYLIC MICA • RIPPLE MICRO-INTERACTIONS</div>
+        <h1 class="mt-6 text-[48px] md:text-[72px] font-bold leading-[0.9] tracking-[-0.04em]">Convert<br><span class="text-white">ANY</span> image<br>to <span class="text-white">ANY</span> format</h1>
+        <p class="mt-6 text-[16px] md:text-[18px] text-dim max-w-[600px] leading-relaxed">V3.2 Pro Dark Studio — Now with resizable sidebar (drag 200-400px, saved), Windows 11 Mica/Acrylic blur (Ctrl+Shift+A), ripple on every button, glassmorphism empty states with neon dot. Linear/Figma/Raycast inspired, 50+ formats, 100% offline.</p>
+        <div class="mt-8 flex flex-wrap gap-3">
+          <a href="#download" class="h-11 px-6 rounded-full bg-white text-black font-bold text-[14px] hover:bg-neon transition flex items-center">⬇ Download V3.2</a>
+          <a href="https://github.com/muhummadzarrar09-sudo/python-image-switcher" class="h-11 px-6 rounded-full bg-card border border-border font-semibold text-[14px] hover:bg-card2 transition flex items-center">View Source</a>
+          <span class="h-11 px-4 rounded-full bg-card border border-border font-mono text-[12px] flex items-center gap-2"><span class="text-dim">></span> python src/app.py</span>
+        </div>
+        <div class="mt-10 grid grid-cols-3 max-w-[400px] gap-6">
+          <div><div class="text-[24px] font-bold">50+</div><div class="text-[12px] text-dim">Formats</div></div>
+          <div><div class="text-[24px] font-bold">↔️</div><div class="text-[12px] text-dim">Resizable</div></div>
+          <div><div class="text-[24px] font-bold">100%</div><div class="text-[12px] text-dim">Offline</div></div>
+        </div>
+      </div>
+
+      <!-- App Preview V3.2 -->
+      <div class="mt-16 max-w-[1200px] card rounded-[16px] overflow-hidden glow animate-in">
+        <div class="h-10 bg-sidebar border-b border-border flex items-center px-4 gap-2">
+          <div class="flex gap-1.5"><div class="w-3 h-3 rounded-full bg-[#ff5f56]"></div><div class="w-3 h-3 rounded-full bg-[#ffbd2e]"></div><div class="w-3 h-3 rounded-full bg-[#27c93f]"></div></div>
+          <span class="ml-4 text-[12px] font-medium">Image Switcher V3.2 — Resizable • Acrylic • Ripple • Pro Dark Studio</span>
+          <span class="ml-auto text-[10px] text-dim">F11 • Bounds • ⌘K • Ctrl+T • Ctrl+Shift+A • Drag</span>
+        </div>
+        <div class="grid lg:grid-cols-[260px_1fr] min-h-[500px]">
+          <div class="sidebar p-3 hidden lg:block relative">
+            <div class="text-[10px] font-bold text-dim/60 px-2 mb-2">CONVERT</div>
+            <div class="h-9 rounded-[10px] bg-card2 border border-border px-3 flex items-center text-[13px] font-semibold">🖼️ Single</div>
+            <div class="h-9 rounded-[10px] px-3 flex items-center text-[13px] text-dim">🔥 Batch</div>
+            <div class="h-9 rounded-[10px] px-3 flex items-center text-[13px] text-dim">✨ Presets</div>
+            <div class="mt-4 card rounded-[12px] p-3 border-neon/20"><div class="text-[11px] font-bold text-neon">↔️ Drag to resize • 200-400px</div><div class="text-[10px] text-dim mt-1">Saved to config • Neon on hover</div></div>
+            <div class="absolute top-0 right-0 w-1 h-full bg-neon/30"></div>
+          </div>
+          <div class="p-6 bg-bg">
+            <div class="card rounded-[16px] p-6">
+              <div class="flex justify-between items-center"><span class="text-[14px] font-bold">No file selected — Drop image or Ctrl+O</span><button class="h-10 px-4 rounded-[10px] bg-white text-black font-bold text-[13px]">Browse</button></div>
+              <div class="mt-3 text-[11px] text-dim">Drag & Drop anywhere • PNG JPG SVG WEBP HEIC AVIF • Offline 100% local • Ripple on click</div>
+              <div class="mt-6 grid grid-cols-[1fr_40px_1fr] gap-3 items-center"><div class="cmd h-12 rounded-[10px] px-3 flex items-center text-[12px]">Source Format</div><div class="text-center text-dim">→<br><span class="text-[9px]">TO</span></div><div class="cmd h-12 rounded-[10px] px-3 flex items-center text-[12px]">Target Format</div></div>
+            </div>
+            <div class="mt-4 grid grid-cols-2 gap-4">
+              <div class="card rounded-[12px] p-4 h-[200px] flex flex-col items-center justify-center border border-border"><div class="w-20 h-20 rounded-[12px] bg-[#1a1a1d] border border-[#2a2a2e] flex items-center justify-center"><span class="text-[32px]">📂</span></div><div class="text-[14px] font-bold mt-3">Drop your image</div><div class="text-[11px] text-neon mt-1">Drag & drop • Ctrl+O • F11 • 100% offline</div><div class="mt-3 px-3 py-1 rounded-full bg-[#161618] border border-[#232326] text-[9px] text-dim">Drop image • Ctrl+O • F11 • 100% offline</div></div>
+              <div class="card rounded-[12px] p-4 h-[200px] flex flex-col items-center justify-center border border-border"><div class="w-20 h-20 rounded-[12px] bg-[#1a1a1d] border border-[#2a2a2e] flex items-center justify-center"><span class="text-[32px]">✨</span></div><div class="text-[14px] font-bold mt-3">Awaiting conversion</div><div class="text-[11px] text-neon mt-1">Pick format → CONVERT → AI → 3D</div></div>
+            </div>
+            <div class="mt-4 h-12 card rounded-[12px] flex items-center px-4 justify-between"><span class="text-[11px] text-dim">Ready — Drop anywhere • Ctrl+O • F11 • Acrylic ✨ • Ripple 💧 • Offline</span><button class="h-9 px-5 rounded-[10px] bg-white text-black font-bold text-[13px]">Convert</button></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features V3.2 -->
+    <section class="px-6 md:px-10 py-16 max-w-[1200px]">
+      <h2 class="text-[32px] font-bold tracking-tight">Product-grade, not dev-tool — V3.2</h2>
+      <p class="text-dim mt-2">Resizable, acrylic, ripple — feels like $20/mo.</p>
+      <div class="mt-10 grid md:grid-cols-3 gap-4">
+        <div class="card rounded-[16px] p-6 hover:border-white/20 transition group border-neon/20"><div class="w-10 h-10 rounded-[10px] bg-neon text-black flex items-center justify-center">↔️</div><h3 class="mt-4 font-semibold">Resizable Sidebar</h3><p class="mt-2 text-[13px] text-dim leading-relaxed">Drag handle at right edge — 200-400px, saved to config ui.sidebar_width, cursor sb_h_double_arrow, neon on hover. Like VS Code.</p></div>
+        <div class="card rounded-[16px] p-6 hover:border-white/20 transition border-neon/20"><div class="w-10 h-10 rounded-[10px] bg-neon text-black flex items-center justify-center">✨</div><h3 class="mt-4 font-semibold">Acrylic Mica Blur</h3><p class="mt-2 text-[13px] text-dim leading-relaxed">Windows 11 Mica + AcrylicBlurBehind via DWM SetWindowCompositionAttribute. Ctrl+Shift+A toggle, dark mode aware, fallback. Glassmorphism pro.</p></div>
+        <div class="card rounded-[16px] p-6 hover:border-white/20 transition"><div class="w-10 h-10 rounded-[10px] bg-white text-black flex items-center justify-center">💧</div><h3 class="mt-4 font-semibold">Ripple Micro-interactions</h3><p class="mt-2 text-[13px] text-dim leading-relaxed">Material ripple on every button — expanding oval from click point, press scale 2px, hover lift. Pulse on convert when ready.</p></div>
+        <div class="card rounded-[16px] p-6 hover:border-white/20 transition"><div class="w-10 h-10 rounded-[10px] bg-white text-black flex items-center justify-center">⌘K</div><h3 class="mt-4 font-semibold">Command Palette+</h3><p class="mt-2 text-[13px] text-dim leading-relaxed">Ctrl+K now includes theme (Ctrl+T), titlebar (Ctrl+Shift+T), acrylic (Ctrl+Shift+A), resize hint. Search filter.</p></div>
+        <div class="card rounded-[16px] p-6 hover:border-white/20 transition"><div class="w-10 h-10 rounded-[10px] bg-card2 border border-border flex items-center justify-center">🌓</div><h3 class="mt-4 font-semibold">Light / Dark + Titlebar</h3><p class="mt-2 text-[13px] text-dim leading-relaxed">Toggle light/dark, custom traffic lights draggable, theme-aware acrylic, animations hover/pulse/ripple, page fade.</p></div>
+        <div class="card rounded-[16px] p-6 hover:border-white/20 transition"><div class="w-10 h-10 rounded-[10px] bg-card2 border border-border flex items-center justify-center">🖼️</div><h3 class="mt-4 font-semibold">Glass Empty States</h3><p class="mt-2 text-[13px] text-dim leading-relaxed">Premium empty states — glass card #1a1a1d, neon dot, Segoe UI bold, hint pill. No more boring placeholder.</p></div>
+      </div>
+    </section>
+
+    <!-- Download V3.2 -->
+    <section id="download" class="px-6 md:px-10 py-16 bg-card/30 border-y border-border">
+      <div class="max-w-[1200px]">
+        <h2 class="text-[36px] font-bold tracking-tight">Ready to switch? V3.2</h2>
+        <p class="text-dim mt-2">Per-user install, no admin. Offline only • Resizable • Acrylic • Ripple</p>
+        <div class="mt-8 grid md:grid-cols-3 gap-4">
+          <div class="card rounded-[16px] p-6"><h4 class="font-semibold text-[14px]">1. Clone & Run V3.2</h4><pre class="mt-3 bg-bg rounded-[10px] p-3 text-[11px] font-mono overflow-x-auto border border-border">git clone https://github.com/muhummadzarrar09-sudo/python-image-switcher.git
+cd python-image-switcher
+pip install -r requirements.txt
+python src/app.py
+# Drag sidebar • Ctrl+Shift+A acrylic • Ripple on click</pre></div>
+          <div class="card rounded-[16px] p-6 border-white/20"><h4 class="font-semibold text-[14px] text-white">2. Install (Recommended)</h4><pre class="mt-3 bg-bg rounded-[10px] p-3 text-[11px] font-mono overflow-x-auto border border-border">powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Force
+
+# with context menu
+.\install.ps1 -FileAssociations -ContextMenu</pre></div>
+          <div class="card rounded-[16px] p-6"><h4 class="font-semibold text-[14px]">3. Check Branches</h4><pre class="mt-3 bg-bg rounded-[10px] p-3 text-[11px] font-mono overflow-x-auto border border-border">python tools/pinger.py --branches
+# watch
+python tools/pinger.py --branches --watch --interval 60</pre></div>
+        </div>
+        <div class="mt-8 flex gap-3"><a href="https://github.com/muhummadzarrar09-sudo/python-image-switcher" class="h-11 px-6 rounded-full bg-white text-black font-bold text-[14px] flex items-center hover:bg-zinc-200 transition">Download V3.2 from GitHub</a><span class="h-11 px-4 rounded-full bg-card border border-border font-mono text-[12px] flex items-center">MIT • CustomTkinter • Python 3.11+ • Windows 10/11 • V3.2.0</span></div>
+      </div>
+    </section>
+
+    <footer class="px-6 md:px-10 py-8 text-[11px] text-dim font-mono border-t border-border flex justify-between"><span>Image Switcher V3.2 • Resizable • Acrylic Mica • Ripple • Pro Dark Studio • RHHHAAAAA</span><span><a href="https://github.com/muhummadzarrar09-sudo/python-image-switcher" class="hover:text-white">GitHub</a> • Offline • No Cloud • V3.2</span></footer>
+  </main>
+</div>
+
+<script>
+document.getElementById('themeToggle').addEventListener('click', () => {
+  document.documentElement.classList.toggle('dark');
+  document.body.style.background = document.documentElement.classList.contains('dark') ? '#0a0a0b' : '#ffffff';
+  document.body.style.color = document.documentElement.classList.contains('dark') ? '#e4e4e7' : '#111113';
+});
+</script>
+</body>
+</html>

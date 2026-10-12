@@ -61,7 +61,7 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
     editor = EditorWindow(root)
     # CTk's geometry API accepts logical units and scales them internally;
     # the comparison viewport is specified in *physical* client pixels.
-    scale = editor._get_widget_scaling()
+    scale = editor._get_window_scaling()
     editor.geometry(f"{round(size[0] / scale)}x{round(size[1] / scale)}")
     editor.update()
     meta: dict = {
@@ -70,7 +70,7 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
         "requested_window": {"width": size[0], "height": size[1]},
         "dpi_for_window": dpi_for_window(editor),
         "tk_pixels_per_point": float(root.tk.call("tk", "scaling")),
-        "ctk_widget_scaling": float(editor._get_widget_scaling()),
+        "ctk_window_scaling": float(editor._get_window_scaling()),
         "source_names": [p.name for p in photos],  # never store full private source paths
         "states": {},
         "notes": "Real OS capture; fixture/photo and approval must be recorded separately. "

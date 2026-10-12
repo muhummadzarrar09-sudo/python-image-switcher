@@ -59,13 +59,21 @@ function Find-InnoCompiler {
 if ($ProbeTest) {
     # CI regression: a launcher writing to stderr and exiting nonzero must be
     # treated as unavailable, not terminate the updater's version search.
-    $available = Get-Command python -ErrorAction Stop
-    $errorCode = 'import sys; sys.stderr.write("No matching runtime\\n"); sys.exit(103)'
-    if (Test-Python311 -command $available.Source -prefix @('-c', $errorCode)) {
-        throw 'Probe incorrectly accepted a missing runtime'
+    try {
+        $available = Get-Command python -ErrorAction Stop
+        $errorCode = 'import sys; sys.stderr.write("No matching runtime"); sys.exit(103)'
+        if (Test-Python311 -command $available.Source -prefix @('-c', $errorCode)) {
+            throw 'Probe incorrectly accepted a missing runtime'
+        }
+        Write-Host 'Missing-runtime probe handled safely.'
+        # Actions' PowerShell wrapper exits with LASTEXITCODE even if a failed
+        # native probe was intentional and this script returned normally.
+        $global:LASTEXITCODE = 0
+        return
+    } catch {
+        Write-Host "::error file=update-alpha.ps1,line=59::$($_.Exception.Message)"
+        throw
     }
-    Write-Host 'Missing-runtime probe handled safely.'
-    return
 }
 
 Push-Location $root

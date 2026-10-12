@@ -1,0 +1,33 @@
+name: Windows editor preview (not a release)
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - arena/a3458c15-python-image-switcher
+
+jobs:
+  windows-preview:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt pytest
+      - name: Test editor
+        run: python -m pytest -q tests/test_editor_render.py tests/test_photo_project.py
+      - name: Build preview executable
+        run: python build_exe.py --onedir --console
+      - name: Smoke-test packaged editor without UI
+        run: .\dist\ImageSwitcher\ImageSwitcher.exe --editor-self-test
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Build preview installer
+        run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer.iss'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-switcher-windows-preview-unsigned
+          path: dist/ImageSwitcher-Setup-0.2.0-preview.exe
+          if-no-files-found: error

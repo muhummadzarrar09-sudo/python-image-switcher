@@ -48,6 +48,9 @@ class ImageSwitcherApp(ctk.CTk):
 
         self.settings_btn = ctk.CTkButton(header, text="⚙️ Settings", width=100, height=32, fg_color="#333", command=self.open_settings)
         self.settings_btn.grid(row=0, column=2, padx=10)
+        self.photo_editor_btn = ctk.CTkButton(header, text="Still Photo Editor", width=155,
+                                               command=self.open_photo_editor)
+        self.photo_editor_btn.grid(row=0, column=3, padx=10)
 
         # ===== TOP CONTROLS: File drop + format selectors =====
         top = ctk.CTkFrame(self, fg_color="#252525", corner_radius=8)
@@ -363,6 +366,10 @@ class ImageSwitcherApp(ctk.CTk):
                     subprocess.Popen(["xdg-open", folder])
                 except:
                     messagebox.showinfo("Folder", folder)
+
+    def open_photo_editor(self):
+        from src.editor.window import EditorWindow
+        EditorWindow(self)
 
     def open_settings(self):
         win = ctk.CTkToplevel(self)

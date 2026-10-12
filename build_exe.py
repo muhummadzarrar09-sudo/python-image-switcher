@@ -57,6 +57,9 @@ def build(onefile=True, windowed=True, clean=True):
         "--hidden-import=PyMuPDF",
         "--collect-all=customtkinter",
         "--collect-all=cairosvg",
+        "--collect-all=rawpy",
+        "--collect-all=tifffile",
+        "--hidden-import=src.editor.window",
         # Add data
         f"--add-data=assets{os.pathsep}assets" if os.path.exists("assets") else "",
         # Optimize

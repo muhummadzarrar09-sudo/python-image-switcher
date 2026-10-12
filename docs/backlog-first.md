@@ -1,0 +1,15 @@
+# Backlog-first execution order (Image Switcher)
+
+User priority: work through the seven Backlog issues before returning to the five already In Progress. An issue's Linear status remains open until its own acceptance criteria are met; a partial code change is not a completion claim. The AI export concept is the direction for the *entire* app, not a functional specification or a real Windows screenshot. An AI fixture may unblock testing but is not an approved photo or visual sign-off.
+
+| Order | Issue | Next verifiable milestone | Completion gate / dependency |
+| --- | --- | --- | --- |
+| 1 | MUH-49 crop/background and error/empty states | Reject unsupported NEF masks and undersized replacement before changing edits; protect mask coordinates during pending previews; capture real popup/error states. | User-approved Windows 11 screenshots for the tool/empty/error states and keyboard/reversibility tests. |
+| 2 | MUH-46 canvas and honest preview | Check framing and mask coordinate mapping at multiple viewport/DPI sizes, and disclose downsampled/NEF preview behavior. | Windows 11 populated screenshots and actual-source comparison; full-resolution export remains untouched. |
+| 3 | MUH-50 modal export | Escape/cancel/folder picker focus, selected/batch scope, collision handling, export byte/project checks, and popup geometry. | Approved popup screenshot and installed Windows keyboard/modal checks; no unsupported C2PA/JPG-lossless wording. |
+| 4 | MUH-44 responsive design spec | Tabulate target and actual layout tokens/geometry, color/contrast and narrow-window behavior at 100/125/150%. | **Depends on approved reference package from MUH-45 (In Progress).** Provisional numbers from an AI mockup cannot be marked approved. |
+| 5 | MUH-53 DPI/visual/accessibility checks | Deterministic fixture captures, tab/focus checks, reviewable ROI/diff artifacts with variable-font masking. | **Depends on accepted baseline and tolerances from MUH-44/MUH-45.** CI fixture screenshots alone are smoke tests, not pixel parity. |
+| 6 | MUH-52 Windows 11 sign-off/update gate | Exercise installed in-place update, protected full-batch export and all UI states at the chosen viewport. | **Requires user Windows 11 visual sign-off** and resolved/explicitly accepted mismatches; no real-photo requirement for developing other tasks. |
+| 7 | MUH-56 optional GPU backend | Profile on actual GPU/driver and RAM, then choose one measured operation with output parity and CPU fallback; report supported devices. | **Requires hardware details/device tests.** No GPU acceleration is present; CPU speedup is tracked separately in MUH-55 (In Progress). |
+
+This order does not close MUH-45, MUH-47, MUH-48, MUH-51 or MUH-55 early. Where a Backlog issue depends on an In Progress baseline, implement independently testable pieces but keep the issue open rather than claiming completion out of order. See `docs/mockups/windows-visual-baseline.md` for the non-private AI-fixture capture command, and `PERFORMANCE.md` for the non-sensitive GPU/RAM report.

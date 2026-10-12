@@ -7,7 +7,7 @@ import tifffile
 
 from src.editor.batch import BatchSession
 from src.editor.project import read_project
-from src.editor.render import PhotoRenderError, export_lossless, render, source_info, still_photo_frames
+from src.editor.render import PhotoRenderError, edited_size, export_lossless, render, source_info, still_photo_frames
 from src.editor.workflow import export_batch, import_project
 
 
@@ -50,6 +50,21 @@ def test_crop_rotate_preserves_numbered_exception_and_mask(tmp_path):
     batch.add_mask_stroke(1, .5, .5, .2, add_background=False)
     out, _, _ = render(photo, batch)
     assert out.getpixel((15, 10))[1] > 10
+
+
+def test_edited_dimensions_match_render_after_exif_crop_and_rotation(tmp_path):
+    source = tmp_path / "portrait.jpg"
+    image = Image.new("RGB", (40, 30), "red")
+    exif = Image.Exif()
+    exif[274] = 6  # 90-degree camera orientation; render applies it first
+    image.save(source, exif=exif)
+    batch = BatchSession()
+    photo = batch.add_photo(str(source))
+    assert source_info(str(source))["size"] == (30, 40)
+    batch.set_crop(photo.number, (0, 0, .5, 1))
+    batch.set_rotation(photo.number, 90)
+    assert edited_size(photo) == (40, 15)
+    assert render(photo, batch)[0].size == edited_size(photo)
 
 
 def test_palette_transparency_is_preserved(tmp_path):

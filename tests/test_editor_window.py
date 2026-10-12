@@ -1,6 +1,7 @@
 """Windows GUI smoke test: real adjustment controls and deferred export dialog."""
 import sys
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -65,6 +66,72 @@ def test_named_adjustment_sliders_and_export_dialog_do_not_write_early(tmp_path,
             dialog.close()
         if editor and editor.winfo_exists():
             editor.destroy()
+
+
+def test_background_validation_and_stale_mask_click_are_non_destructive(tmp_path, tk_root):
+    from PIL import Image
+    from src.editor.window import EditorWindow
+
+    source = tmp_path / "subject.jpg"
+    small = tmp_path / "small.png"
+    large = tmp_path / "large.png"
+    Image.new("RGB", (40, 30), "blue").save(source)
+    Image.new("RGB", (20, 20), "red").save(small)
+    Image.new("RGB", (70, 80), "red").save(large)
+    editor = EditorWindow(tk_root)
+    try:
+        tk_root.update()
+        photo = editor.batch.add_photo(str(source))
+        editor.select(photo.number)
+        with pytest.raises(ValueError, match="upscaled"):
+            editor.set_background("image", source=str(small))
+        assert not photo.background and not photo.protected
+        editor.batch.set_crop(photo.number, (0, 0, .5, 1))
+        editor.batch.set_rotation(photo.number, 90)
+        editor.set_background("image", source=str(large))
+        assert photo.background["mode"] == "image"
+        editor.mask_painting = True
+        editor._canvas_bounds = (10, 10, 40, 30)
+        editor._displayed_generation = editor._preview_generation - 1
+        editor.paint_mask(SimpleNamespace(x=20, y=20))
+        assert not photo.mask_strokes  # preview geometry is stale after the edit
+        editor._displayed_generation = editor._preview_generation
+        editor.paint_mask(SimpleNamespace(x=20, y=20))
+        assert len(photo.mask_strokes) == 1
+        nef = tmp_path / "raw.nef"
+        nef.write_bytes(b"not a camera file")
+        raw_photo = editor.batch.add_photo(str(nef))
+        editor.current = raw_photo.number
+        with pytest.raises(ValueError, match="16-bit NEF"):
+            editor.set_background("color", color="#123456")
+        assert not raw_photo.background and not raw_photo.protected
+    finally:
+        editor.destroy()
+
+
+def test_export_escape_closes_without_writing(tmp_path, tk_root):
+    from PIL import Image
+    from src.editor.window import EditorWindow, ExportOptions
+
+    source = tmp_path / "source.png"
+    Image.new("RGB", (32, 24), "blue").save(source)
+    editor = EditorWindow(tk_root)
+    dialog = None
+    try:
+        tk_root.update()
+        editor.select(editor.batch.add_photo(str(source)).number)
+        dialog = ExportOptions(editor)
+        tk_root.update()
+        dialog.folder.set(str(tmp_path / "output"))
+        dialog.creator.event_generate("<Escape>")
+        tk_root.update()
+        assert not dialog.winfo_exists()
+        assert not (tmp_path / "output").exists()
+        assert editor.batch.rights == {}
+    finally:
+        if dialog is not None and dialog.winfo_exists():
+            dialog.close()
+        editor.destroy()
 
 
 def test_latest_preview_wins_after_fast_selection_and_edits(tmp_path, tk_root):

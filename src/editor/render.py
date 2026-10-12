@@ -169,11 +169,27 @@ def source_info(path: str, *, frame_index: int | None = None) -> dict:
             if image.width * image.height > MAX_RENDER_PIXELS:
                 raise PhotoRenderError("Photo exceeds the current safe processing size")
             _check_depth(path, image)
-            return {"size": image.size, "raw": False}
+            # Full renders apply EXIF orientation before cropping. Report the
+            # displayed size so replacement validation uses the same axes.
+            size = image.size[::-1] if image.getexif().get(274, 1) in (5, 6, 7, 8) else image.size
+            return {"size": size, "raw": False}
+
     except PhotoRenderError:
         raise
     except Exception as exc:
         raise PhotoRenderError(f"Cannot read still photo: {exc}") from exc
+
+
+def edited_size(photo: Photo) -> tuple[int, int]:
+    """Final master dimensions, without decoding a full-resolution image."""
+    width, height = source_info(photo.source, frame_index=photo.frame_index)["size"]
+    if photo.crop:
+        x0, y0, x1, y1 = photo.crop
+        width = round(x1 * width) - round(x0 * width)
+        height = round(y1 * height) - round(y0 * height)
+    if photo.rotation in (90, 270):
+        width, height = height, width
+    return width, height
 
 
 def _mask_from_strokes(photo: Photo, size: tuple[int, int]) -> Image.Image:

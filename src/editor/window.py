@@ -17,7 +17,7 @@ from PIL import Image, ImageColor, ImageTk
 
 from .batch import BatchSession, EDIT_FIELDS
 from .preview import PreviewRenderer, PreviewRequest
-from .render import STILL_EXTENSIONS, source_info, still_photo_frames, _open_source
+from .render import STILL_EXTENSIONS, edited_size, source_info, still_photo_frames, _open_source
 from .workflow import export_batch, import_project
 from .version import ALPHA_VERSION
 
@@ -121,6 +121,7 @@ class EditorWindow(ctk.CTkToplevel):
         self._preview_job = None
         self._preview_poll_job = None
         self._displayed_number: int | None = None
+        self._displayed_generation = -1
         self._syncing_sliders = False
         self.sliders: dict[str, ctk.CTkSlider] = {}
         self.value_labels: dict[str, ctk.CTkLabel] = {}
@@ -476,7 +477,8 @@ class EditorWindow(ctk.CTkToplevel):
 
     def open_background_tools(self):
         try:
-            self.selected_photo()
+            if Path(self.selected_photo().source).suffix.lower() == ".nef":
+                raise ValueError("16-bit NEF background masking is not available; no edit was made")
             if self.background_window and self.background_window.winfo_exists():
                 self.background_window.lift()
                 self.background_window.focus_force()
@@ -496,10 +498,18 @@ class EditorWindow(ctk.CTkToplevel):
 
     def set_background(self, mode: str, *, color: str = "#ffffff", source: str | None = None):
         photo = self.selected_photo()
+        if mode != "none" and Path(photo.source).suffix.lower() == ".nef":
+            raise ValueError("16-bit NEF background masking is not available; the photo was not changed")
         if mode == "image":
             if not source:
                 raise ValueError("Choose a replacement image")
-            source_info(source)
+            replacement = source_info(source)
+            if replacement["raw"]:
+                raise ValueError("NEF replacement requires 16-bit compositing, not yet implemented")
+            target_width, target_height = edited_size(photo)
+            bg_width, bg_height = replacement["size"]
+            if bg_width < target_width or bg_height < target_height:
+                raise ValueError("Replacement image would be upscaled; choose a larger image")
             settings = {"mode": mode, "source": source}
         elif mode in ("blur", "remove", "color"):
             if mode == "color":
@@ -522,7 +532,10 @@ class EditorWindow(ctk.CTkToplevel):
         self.show_current()
 
     def paint_mask(self, event):
-        if not self.mask_painting or self.current is None or self.view_mode.get() != "After":
+        # A pending crop, rotation, resize or selection invalidates the old
+        # displayed rectangle. Never map clicks through stale image bounds.
+        if (not self.mask_painting or self.current is None or self.view_mode.get() != "After"
+                or self._displayed_generation != self._preview_generation):
             return
         try:
             photo = self.selected_photo()
@@ -555,6 +568,7 @@ class EditorWindow(ctk.CTkToplevel):
         if self.current is None:
             self._preview_image = None
             self._displayed_number = None
+            self._displayed_generation = -1
             self._canvas_bounds = (0, 0, 0, 0)
             self.canvas.delete("all")
             self.canvas.create_text(canvas_w//2, canvas_h//2, text="Add still photos to begin",
@@ -610,6 +624,7 @@ class EditorWindow(ctk.CTkToplevel):
             self.canvas.create_image(left, top, anchor="nw", image=self._preview_image)
             photo = self.selected_photo()
             self._displayed_number = photo.number
+            self._displayed_generation = self._preview_generation
             state = "Protected" if photo.protected else "Batch"
             kind = "Source preview" if self.view_mode.get() == "Before" else "Edited preview"
             self.status.configure(text=f"#{photo.number:04d} · {state} · {kind} · {Path(photo.source).name[:28]}")
@@ -617,6 +632,7 @@ class EditorWindow(ctk.CTkToplevel):
             self._show_preview_error(str(exc))
 
     def _show_preview_error(self, error: str):
+        self._displayed_generation = -1
         self._canvas_bounds = (0, 0, 0, 0)
         self.canvas.delete("all")
         self.canvas.create_text(10, 20, anchor="nw", fill="orange", text=error[:105])
@@ -804,6 +820,7 @@ class ExportOptions(ctk.CTkToplevel):
         self.resizable(False, False)
         self.transient(editor)
         self.protocol("WM_DELETE_WINDOW", self.close)
+        self.bind("<Escape>", lambda _event: self.close())
         self.shade = None
         try:
             shade = ctk.CTkToplevel(editor)
@@ -885,6 +902,7 @@ class ExportOptions(ctk.CTkToplevel):
             try:
                 self.lift(self.shade if self.shade and self.shade.winfo_exists() else self.editor)
                 self.grab_set()
+                self.creator.focus_set()
             except tk.TclError:
                 self.after(50, self._grab_when_visible)
 
@@ -892,6 +910,10 @@ class ExportOptions(ctk.CTkToplevel):
         destination = filedialog.askdirectory(parent=self, title="Choose folder for numbered master/project pairs")
         if destination:
             self.folder.set(destination)
+        # Windows native folder choosers can return focus to the dimmed editor.
+        # Return it to the live export dialog without changing its fields.
+        if self.winfo_exists():
+            self.after_idle(self._grab_when_visible)
 
     def confirm(self):
         destination = self.folder.get().strip()
@@ -904,8 +926,12 @@ class ExportOptions(ctk.CTkToplevel):
         self.editor.begin_export(destination, rights, numbers)
 
     def close(self):
+        if not self.winfo_exists():
+            return
         if self.grab_current() == self:
             self.grab_release()
         if self.shade and self.shade.winfo_exists():
             self.shade.destroy()
         self.destroy()
+        if self.editor.winfo_exists():
+            self.editor.focus_set()

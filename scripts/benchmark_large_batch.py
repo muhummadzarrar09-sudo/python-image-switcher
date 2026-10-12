@@ -28,7 +28,7 @@ def main() -> None:
         parser.error("Use the Windows 11 Tk editor for this UI/RAM diagnostic")
     import customtkinter as ctk
     from PIL import Image
-    from src.editor.window import EditorWindow, RAIL_PAGE_SIZE
+    from src.editor.window import EditorWindow, RAIL_PAGE_SIZE, THUMB_CACHE_LIMIT
 
     with tempfile.TemporaryDirectory(prefix="image-switcher-421-") as directory:
         source = Path(directory) / "generated.jpg"
@@ -70,6 +70,8 @@ def main() -> None:
                       "import_queue_limit": editor._import_queue.maxsize,
                       "mounted_rail_tiles": len(editor._tiles),
                       "rail_tile_limit": RAIL_PAGE_SIZE,
+                      "cached_thumbnail_images": len(editor._thumbnail_cache),
+                      "thumbnail_cache_limit": THUMB_CACHE_LIMIT,
                       "gpu_status": editor._preview_renderer.gpu_status,
                       "note": "Generated JPG paths only; no private photo, NEF, full-size batch export, "
                               "Tk p95 latency or varied-file I/O measured."}

@@ -53,7 +53,7 @@ def test_bulk_jpg_and_mpo_import_keeps_all_stills_and_reports_progress(tmp_path,
 
 def test_over_400_distinct_jpg_paths_keep_queue_and_rail_bounded(tmp_path, tk_root):
     from PIL import Image
-    from src.editor.window import EditorWindow, RAIL_PAGE_SIZE
+    from src.editor.window import EditorWindow, RAIL_PAGE_SIZE, THUMB_CACHE_LIMIT
 
     template = tmp_path / "template.jpg"
     Image.new("RGB", (320, 240), (100, 80, 60)).save(template)
@@ -81,6 +81,7 @@ def test_over_400_distinct_jpg_paths_keep_queue_and_rail_bounded(tmp_path, tk_ro
         assert [p.number for p in editor.batch.photos] == list(range(1, 422))
         assert editor.current == 421 and editor._rail_page == 8
         assert len(editor._tiles) == 37 and len(editor._tiles) <= RAIL_PAGE_SIZE
+        assert len(editor._thumbnail_cache) <= THUMB_CACHE_LIMIT
         assert peak_pending <= 24
     finally:
         editor.destroy()

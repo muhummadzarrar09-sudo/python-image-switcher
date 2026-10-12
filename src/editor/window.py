@@ -5,6 +5,7 @@ own editing tools, while export settings appear only after clicking Export.
 """
 from __future__ import annotations
 
+from collections import OrderedDict
 from copy import deepcopy
 from pathlib import Path
 from queue import Empty, Full, Queue
@@ -92,6 +93,7 @@ class ImportProgress(ctk.CTkToplevel):
 
 
 RAIL_PAGE_SIZE = 48  # bound Tk widget count, independent of batch size
+THUMB_CACHE_LIMIT = 192  # four rail pages of small decoded thumbnails
 
 
 class EditorWindow(ctk.CTkToplevel):
@@ -116,7 +118,7 @@ class EditorWindow(ctk.CTkToplevel):
         self.crop_window: CropTools | None = None
         self.background_window: BackgroundTools | None = None
         self._preview_image = None
-        self._thumbnail_cache: dict[str, ctk.CTkImage] = {}
+        self._thumbnail_cache: OrderedDict[str, ctk.CTkImage] = OrderedDict()
         self._tiles: dict[str, tuple[ctk.CTkFrame, ctk.CTkButton, ctk.CTkLabel]] = {}
         self._tile_states: dict[str, tuple[bool, bool, str]] = {}
         self._rail_page = 0
@@ -333,8 +335,8 @@ class EditorWindow(ctk.CTkToplevel):
                 else:
                     for index, image in frames:
                         photo = self.batch.add_photo(path, frame_index=index)
-                        self._thumbnail_cache[photo.id] = ctk.CTkImage(
-                            light_image=image, dark_image=image, size=(104, 61))
+                        self._remember_thumbnail(photo.id, ctk.CTkImage(
+                            light_image=image, dark_image=image, size=(104, 61)))
                         self.current = photo.number
                         self._import_added += 1
                 self.import_dialog.show_progress(self._import_processed, self._import_added,
@@ -366,15 +368,23 @@ class EditorWindow(ctk.CTkToplevel):
                                    f"{len(self._import_errors)} file(s) could not be read.\n\n"
                                    f"{first}{extra}\n\nSuccessfully added photos remain in the batch.", parent=self)
 
+    def _remember_thumbnail(self, photo_id: str, image: ctk.CTkImage):
+        self._thumbnail_cache[photo_id] = image
+        self._thumbnail_cache.move_to_end(photo_id)
+        while len(self._thumbnail_cache) > THUMB_CACHE_LIMIT:
+            self._thumbnail_cache.popitem(last=False)
+
     def thumbnail(self, photo):
-        """Cache a small original preview; never re-render full-resolution photos for the rail."""
+        """Keep a bounded LRU of small rail images; never cache full frames."""
         if photo.id not in self._thumbnail_cache:
             try:
                 rgb = _thumbnail_pixels(photo.source, photo.frame_index)
             except Exception:
                 rgb = Image.new("RGB", (104, 61), "#343943")
-            self._thumbnail_cache[photo.id] = ctk.CTkImage(light_image=rgb, dark_image=rgb,
-                                                            size=(104, 61))
+            self._remember_thumbnail(photo.id, ctk.CTkImage(light_image=rgb, dark_image=rgb,
+                                                              size=(104, 61)))
+        else:
+            self._thumbnail_cache.move_to_end(photo.id)
         return self._thumbnail_cache[photo.id]
 
     def refresh_list(self):
@@ -388,8 +398,8 @@ class EditorWindow(ctk.CTkToplevel):
         for photo_id in set(self._tiles) - live:
             self._tiles.pop(photo_id)[0].destroy()
             self._tile_states.pop(photo_id, None)
-        # Thumbnails are bounded small JPEG-derived stills, not full frames.
-        # Keep existing thumbnails across pages to avoid repeated camera decode.
+        # A small LRU avoids repeated camera decode for recent pages without
+        # retaining one Pillow/CTkImage forever for every batch entry.
         all_ids = {photo.id for photo in self.batch.photos}
         for photo_id in set(self._thumbnail_cache) - all_ids:
             self._thumbnail_cache.pop(photo_id, None)

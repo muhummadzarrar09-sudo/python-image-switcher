@@ -32,7 +32,7 @@ py -3.11 scripts/update_alpha.py
 
 The setup is unsigned and can show an unknown-publisher warning; proceed only if you trust this checkout. Alpha.7 probes GPU readiness in the background at boot; OpenCL is bundled when the optional wheel is installed during the build, but a CPU-only or unsupported-driver PC still starts on CPU. GPU may run eligible 8-bit RGB exposure/contrast previews **and full-resolution batch-export color math**, after a per-recipe exhaustive 8-bit pixel check. NEF, other filters and lossless file encoding still use CPU. The installed app on the user's RTX 4070 needs device-specific alpha.7 update/export validation. The GPU status label reports readiness or CPU fallback. Set `IMAGE_SWITCHER_GPU=off` before launch only to troubleshoot drivers.
 
-To confirm **the installed executable**, not the source probe, on your own machine after the alpha.6 in-place update, run from the checkout in PowerShell (no photo needed):
+To confirm **the installed executable**, not the source probe, on your own machine after the alpha.7 in-place update, run from the checkout in PowerShell (no photo needed):
 
 ```powershell
 $editor = Join-Path $env:LOCALAPPDATA 'Programs\Image Switcher\ImageSwitcherEditor.exe'
@@ -42,7 +42,7 @@ if ($process.ExitCode -ne 0) { throw "GPU report failed: $($process.ExitCode)" }
 Get-Content $report
 ```
 
-The report uses a generated 512×256 image and records `gpu_status`, whether the GPU really processed the preview **and a numbered lossless batch master**, plus CPU pixel comparisons. It never reads your camera roll. The output directory is ignored by Git. If your install lives in a custom directory, substitute its actual `ImageSwitcherEditor.exe` path. CPU-only Windows CI verifies that the *packaged* diagnostic runs and matches CPU; your device result is needed before claiming installed RTX support. The Windows workflow builds the setup, installs it on its disposable runner, runs the updater against that existing install, smoke-tests the updated executable and uninstalls it. That is **not** proof of GUI functionality, camera compatibility, or clean Windows 11 installation. The app cannot be remotely installed on your personal PC from this sandbox.
+The report uses a generated 512×256 preview and a separate generated 2400×1600 numbered lossless export (crossing multiple GPU transfer tiles). It records `gpu_status`, which numbered export actually used GPU color math, and CPU pixel comparisons. It never reads your camera roll. The output directory is ignored by Git. If your install lives in a custom directory, substitute its actual `ImageSwitcherEditor.exe` path. CPU-only Windows CI verifies that the *packaged* diagnostic runs and matches CPU; your device result is needed before claiming installed RTX support. The Windows workflow builds the setup, installs it on its disposable runner, runs the updater against that existing install, smoke-tests the updated executable and uninstalls it. That is **not** proof of GUI functionality, camera compatibility, or clean Windows 11 installation. The app cannot be remotely installed on your personal PC from this sandbox.
 
 ## Legacy converter (separate)
 

@@ -7,9 +7,11 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from copy import deepcopy
+import json
 from pathlib import Path
 from queue import Empty, Full, Queue
 import os
+import tempfile
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -809,20 +811,47 @@ class EditorWindow(ctk.CTkToplevel):
 
         def work():
             accelerator = None
+            gpu_error = None
             if (os.environ.get("IMAGE_SWITCHER_GPU", "auto").lower() != "off"
                     and any(eligible_export(photo, snapshot) for photo in snapshot.photos
                             if numbers is None or photo.number in numbers)):
                 try:
                     accelerator = OpenCLPreview()
-                except Exception:
-                    pass  # missing driver/runtime: CPU path still exports all photos
+                except Exception as exc:
+                    gpu_error = str(exc)  # CPU fallback, no exports lost
+            gpu_numbers, cpu_numbers = [], []
+
+            def on_exported(number, done, total, used_gpu):
+                (gpu_numbers if used_gpu else cpu_numbers).append(number)
+                self._export_queue.put(("progress", number, done, (total, used_gpu)))
+
             try:
-                results = export_batch(
-                    snapshot, directory, numbers=numbers, accelerator=accelerator,
-                    on_exported=lambda number, done, total:
-                        self._export_queue.put(("progress", number, done, total)))
-                accelerated = accelerator.full_calls if accelerator else 0
-                self._export_queue.put(("done", len(results), accelerated, None))
+                results = export_batch(snapshot, directory, numbers=numbers,
+                                       accelerator=accelerator, on_exported=on_exported)
+                report_path, warning = None, None
+                try:
+                    # A per-number record is more useful than a readiness label
+                    # or a long truncated popup for batches of 400+ photos.
+                    fd, report_path = tempfile.mkstemp(prefix="batch-gpu-usage-", suffix=".json",
+                                                        dir=directory)
+                    with os.fdopen(fd, "w", encoding="utf-8") as output:
+                        json.dump({"total_exported": len(results),
+                                   "gpu_adjusted_photo_numbers": gpu_numbers,
+                                   "cpu_photo_numbers": cpu_numbers,
+                                   "gpu_device": getattr(accelerator, "device_name", None),
+                                   "gpu_error": getattr(accelerator, "error", gpu_error),
+                                   "scope": "8-bit RGB exposure/contrast color math only; "
+                                            "decode and PNG/TIFF/.isphoto writing use CPU"}, output, indent=2)
+                        output.write("\n")
+                except OSError as exc:
+                    warning = f"Could not save GPU usage report: {exc}"
+                    if report_path:
+                        try:
+                            os.unlink(report_path)
+                        except OSError:
+                            pass
+                    report_path = None
+                self._export_queue.put(("done", len(results), gpu_numbers, (report_path, warning)))
             except Exception as exc:
                 self._export_queue.put(("error", exc, None, None))
         threading.Thread(target=work, daemon=True).start()
@@ -836,10 +865,17 @@ class EditorWindow(ctk.CTkToplevel):
             except Empty:
                 break
             if kind == "progress":
-                self.status.configure(text=f"Exported {second}/{third} · last photo #{first:04d}")
+                total, used_gpu = third
+                self.status.configure(text=f"Exported {second}/{total} · photo #{first:04d} "
+                                           f"({'GPU color math' if used_gpu else 'CPU'})")
             elif kind == "done":
+                report_path, warning = third
+                details = f"\nGPU usage by photo number: {report_path}" if report_path else ""
+                if warning:
+                    details += f"\n{warning}"
                 self.done(f"Exported {first} lossless masters + .isphoto projects to "
-                          f"{self._export_directory}; GPU-adjusted {second}/{first} photos")
+                          f"{self._export_directory}; GPU-adjusted {len(second)}/{first} photos"
+                          f"{details}")
                 return
             elif kind == "error":
                 self.failed(first)

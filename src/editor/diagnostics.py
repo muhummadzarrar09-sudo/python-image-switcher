@@ -59,17 +59,30 @@ def installed_gpu_report(path: str) -> dict:
             # Exercise the same full-resolution batch/export path used by the
             # installed UI, not merely an isolated kernel or preview.
             accelerator = None
+            gpu_export_error = None
             if worker.gpu_status.startswith("GPU ready"):
                 try:
                     accelerator = OpenCLPreview()
-                except Exception:
-                    pass
-            cpu_master, _, _ = render(photo, batch)
-            gpu_master, _, _ = render(photo, batch, accelerator=accelerator)
+                except Exception as exc:
+                    gpu_export_error = str(exc)
+            # Bigger than one million pixels: the installed-app check now
+            # exercises multiple GPU transfer tiles, not only preview-sized
+            # pixels. This is still a generated fixture, never a camera photo.
+            export_source = Path(directory) / "generated-full.png"
+            Image.fromarray(pixels).resize((2400, 1600), Image.Resampling.NEAREST).save(export_source)
+            export_session = BatchSession()
+            export_photo = export_session.add_photo(str(export_source))
+            export_session.set_batch("exposure", .35)
+            export_session.set_batch("contrast", .2)
+            cpu_master, _, _ = render(export_photo, export_session)
+            gpu_master, _, _ = render(export_photo, export_session, accelerator=accelerator)
             export_difference = np.abs(np.asarray(cpu_master).astype(np.int16) -
                                        np.asarray(gpu_master).astype(np.int16))
             output = Path(directory) / "exported"
-            results = export_batch(batch, str(output), accelerator=accelerator)
+            exported_gpu_numbers = []
+            results = export_batch(export_session, str(output), accelerator=accelerator,
+                                   on_exported=lambda number, _done, _total, used_gpu:
+                                       exported_gpu_numbers.append(number) if used_gpu else None)
             if len(results) != 1:
                 raise AssertionError("Diagnostic export did not retain its numbered photo")
             with Image.open(results[0][1]) as exported:
@@ -77,8 +90,10 @@ def installed_gpu_report(path: str) -> dict:
                                              np.asarray(exported).astype(np.int16))
             report = {"packaged": bool(getattr(sys, "frozen", False)),
                       "gpu_status": worker.gpu_status, "gpu_used_for_generated_preview": result[3],
-                      "gpu_used_for_generated_export": bool(accelerator and accelerator.full_calls),
-                      "gpu_export_error": getattr(accelerator, "error", None),
+                      "gpu_used_for_generated_export": bool(exported_gpu_numbers),
+                      "gpu_adjusted_export_photo_numbers": exported_gpu_numbers,
+                      "export_dimensions": [2400, 1600],
+                      "gpu_export_error": getattr(accelerator, "error", gpu_export_error),
                       "gpu_error": worker.gpu_error,
                       "cpu_pixel_sha256": hashlib.sha256(cpu.tobytes()).hexdigest(),
                       "preview_pixel_sha256": hashlib.sha256(gpu_image.tobytes()).hexdigest(),
@@ -87,7 +102,7 @@ def installed_gpu_report(path: str) -> dict:
                       "total_channels": int(delta.size),
                       "export_max_channel_difference": int(export_difference.max()),
                       "exported_png_max_channel_difference": int(exported_difference.max()),
-                      "note": "Generated 512x256 PNG exposure/contrast and one numbered export only. "
+                      "note": "Generated 512x256 preview and 2400x1600 numbered PNG export only. "
                               "No private photo, NEF, all-recipe parity or Tk responsiveness measured."}
         finally:
             worker.close()

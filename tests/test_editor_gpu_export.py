@@ -50,8 +50,12 @@ def test_batch_exports_gpu_eligible_and_cpu_protected_with_pixel_parity(tmp_path
     batch.set_batch("exposure", .35)
     batch.set_batch("contrast", .2)
     accelerated = FakeGPU()
-    results = export_batch(batch, str(tmp_path / "gpu"), accelerator=accelerated)
+    usage = []
+    results = export_batch(batch, str(tmp_path / "gpu"), accelerator=accelerated,
+                           on_exported=lambda number, done, total, gpu:
+                               usage.append((number, done, total, gpu)))
     assert [number for number, _, _ in results] == [1, 2, 3]
+    assert usage == [(1, 1, 3, True), (2, 2, 3, False), (3, 3, 3, True)]
     assert accelerated.full_calls == 2
     assert batch.get(2).protected
     for number, master, project in results:
@@ -69,7 +73,11 @@ def test_failed_device_redoes_master_on_cpu_without_partial_output(tmp_path):
     batch.set_batch("exposure", .35)
     batch.set_batch("contrast", .2)
     gpu = FakeGPU(fail=True)
-    outputs = export_batch(batch, str(tmp_path / "results"), accelerator=gpu)
+    usage = []
+    outputs = export_batch(batch, str(tmp_path / "results"), accelerator=gpu,
+                           on_exported=lambda number, _done, _total, used:
+                               usage.append((number, used)))
+    assert usage == [(1, False)]
     assert gpu.failed and "lost device" in gpu.error and gpu.full_calls == 0
     expected, _, _ = render(photo, batch)
     with Image.open(outputs[0][1]) as master:

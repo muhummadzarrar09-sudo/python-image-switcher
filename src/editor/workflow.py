@@ -46,9 +46,11 @@ def export_batch(batch: BatchSession, directory: str, *, numbers: list[int] | No
         plans.append((photo, master, project))
     result = []
     for photo, master, project in plans:
+        gpu_calls_before = getattr(accelerator, "full_calls", 0)
         with tempfile.TemporaryDirectory(dir=directory, prefix=".export-") as staging:
             staged = os.path.join(staging, os.path.basename(master))
             export_lossless(photo, batch, staged, accelerator=accelerator)
+            used_gpu = getattr(accelerator, "full_calls", 0) > gpu_calls_before
             recipe = asdict(photo)
             # Portable: original/background are in archive; strip machine-local paths.
             recipe.pop("source")
@@ -68,7 +70,7 @@ def export_batch(batch: BatchSession, directory: str, *, numbers: list[int] | No
                 raise
         result.append((photo.number, master, project))
         if on_exported is not None:
-            on_exported(photo.number, len(result), len(plans))
+            on_exported(photo.number, len(result), len(plans), used_gpu)
     return result
 
 

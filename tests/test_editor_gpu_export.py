@@ -1,7 +1,9 @@
 """GPU batch export is opt-in per eligible recipe, exact or CPU-fallback."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import sys
 
 import numpy as np
 import pytest
@@ -29,6 +31,7 @@ def reference(image, exposure, contrast):
 class FakeGPU:
     def __init__(self, fail=False):
         self.full_calls = 0
+        self.device_name = "test double, not a GPU"
         self.failed = False
         self.fail = fail
         self.error = None
@@ -92,3 +95,19 @@ def test_byte_complete_recipe_preflight_rejects_mismatching_gpu():
     with pytest.raises(ValueError, match="differs from CPU"):
         backend._check_exact_parity(.35, .2)
     assert backend._parity[(.35, .2)] is False
+
+
+def test_full_export_benchmark_measures_numbered_masters(tmp_path, monkeypatch, capsys):
+    from scripts import benchmark_gpu_batch
+
+    monkeypatch.setattr(benchmark_gpu_batch, "OpenCLPreview", FakeGPU)
+    monkeypatch.setattr(sys, "argv", ["benchmark_gpu_batch.py", "--count", "2",
+                                  "--size", "320x240", "--write-exports"])
+    benchmark_gpu_batch.main()
+    report = json.loads(capsys.readouterr().out)
+    assert report["count"] == 2
+    assert report["gpu_full_render_count"] == 2
+    assert report["all_pixel_hashes_match"]
+    assert report["full_export"]["gpu_adjusted_photo_numbers"] == [1, 2]
+    assert report["full_export"]["all_master_pixel_hashes_match"]
+    assert report["full_export"]["master_and_project_count"] == 2

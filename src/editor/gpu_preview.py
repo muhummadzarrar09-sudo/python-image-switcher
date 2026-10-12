@@ -1,7 +1,8 @@
-"""Experimental *preview-only* OpenCL exposure/contrast for 8-bit RGB.
+"""Optional OpenCL RGB exposure/contrast for previews and guarded batch export.
 
 No import of pyopencl at module load, no GPU requirement on CPU-only machines.
-Not used by full-resolution rendering, PNG/TIFF export or NEF processing.
+Exports use it only after exact per-recipe 8-bit parity preflight; NEF and other
+adjustments stay on CPU. Full-size GPU transfers are tiled to bound VRAM use.
 """
 from __future__ import annotations
 
@@ -19,8 +20,8 @@ __kernel void exposure_contrast(__global const uchar *source,
     int i = get_global_id(0);
     if (i >= n) return;
     float value = (float)source[i] / 255.0f;
-    value *= exposure;
-    value = (value - 0.5f) * contrast + 0.5f;
+    if (exposure != 1.0f) value *= exposure;
+    if (contrast != 1.0f) value = (value - 0.5f) * contrast + 0.5f;
     output[i] = convert_uchar_sat_rte(clamp(value, 0.0f, 1.0f) * 255.0f);
 }
 """
@@ -49,8 +50,18 @@ def eligible(photo: Photo, batch: BatchSession) -> bool:
                      or photo.background or photo.mask_strokes))
 
 
+def eligible_export(photo: Photo, batch: BatchSession) -> bool:
+    """Only simple 8-bit color edits are eligible; masters never lose precision."""
+    values = batch.effective_settings(photo.number)
+    return (Path(photo.source).suffix.lower() != ".nef"
+            and (values["exposure"] != 0 or values["contrast"] != 0)
+            and all(value == 0 for field, value in values.items()
+                    if field not in ("exposure", "contrast"))
+            and not photo.background and not photo.mask_strokes)
+
+
 class OpenCLPreview:
-    """One worker-owned GPU context and bounded buffers for display-sized RGB."""
+    """One worker-owned GPU context and reusable bounded device buffers."""
 
     def __init__(self):
         import pyopencl as cl  # optional; intentionally absent from required deps
@@ -70,20 +81,65 @@ class OpenCLPreview:
         self._input = None
         self._output = None
         self.calls = 0
+        self.full_calls = 0
+        self.failed = False
+        self._parity: dict[tuple[float, float], bool] = {}
 
-    def apply(self, image: Image.Image, exposure: float, contrast: float) -> Image.Image:
-        if image.mode != "RGB" or image.width * image.height > 1_400_000:
-            raise ValueError("GPU preview accepts canvas-size 8-bit RGB only")
+    def _transform(self, image: Image.Image, exposure: float, contrast: float,
+                   *, tile_pixels: int) -> Image.Image:
+        if image.mode != "RGB":
+            raise ValueError("OpenCL color path requires 8-bit RGB")
         flat = np.ascontiguousarray(np.asarray(image)).reshape(-1)
         result = np.empty_like(flat)
-        if flat.nbytes > self._capacity:
-            # One input and one output buffer, reused while sizes stay small.
-            self._input = self.cl.Buffer(self.context, self.cl.mem_flags.READ_ONLY, flat.nbytes)
-            self._output = self.cl.Buffer(self.context, self.cl.mem_flags.WRITE_ONLY, flat.nbytes)
-            self._capacity = flat.nbytes
-        self.cl.enqueue_copy(self.queue, self._input, flat, is_blocking=False)
-        self.kernel(self.queue, (flat.size,), None, self._input, self._output,
-                    np.float32(2 ** exposure), np.float32(1 + contrast), np.int32(flat.size))
-        self.cl.enqueue_copy(self.queue, result, self._output, is_blocking=True)
-        self.calls += 1
+        tile_channels = tile_pixels * 3
+        for start in range(0, flat.size, tile_channels):
+            source = flat[start:start + tile_channels]
+            if source.nbytes > self._capacity:
+                self._input = self.cl.Buffer(self.context, self.cl.mem_flags.READ_ONLY, source.nbytes)
+                self._output = self.cl.Buffer(self.context, self.cl.mem_flags.WRITE_ONLY, source.nbytes)
+                self._capacity = source.nbytes
+            self.cl.enqueue_copy(self.queue, self._input, source, is_blocking=False)
+            self.kernel(self.queue, (source.size,), None, self._input, self._output,
+                        np.float32(2 ** exposure), np.float32(1 + contrast),
+                        np.int32(source.size))
+            # For device -> NumPy, PyOpenCL derives the byte count from this
+            # exact-sized host slice (not the reusable device buffer capacity).
+            self.cl.enqueue_copy(self.queue, result[start:start + source.size], self._output,
+                                 is_blocking=True)
         return Image.fromarray(result.reshape(image.height, image.width, 3), "RGB")
+
+    def apply(self, image: Image.Image, exposure: float, contrast: float) -> Image.Image:
+        if image.width * image.height > 1_400_000:
+            raise ValueError("GPU preview accepts canvas-size RGB only")
+        result = self._transform(image, exposure, contrast, tile_pixels=1_400_000)
+        self.calls += 1
+        return result
+
+    def _check_exact_parity(self, exposure: float, contrast: float) -> None:
+        key = (exposure, contrast)
+        if key not in self._parity:
+            # For this color-only kernel each channel is independent; the 256
+            # possible uint8 input values cover every output of an 8-bit RGB
+            # photo for one recipe. Check before writing *any* exported master.
+            values = np.arange(256, dtype=np.uint8)
+            ramp = np.repeat(values[:, None], 3, axis=1).reshape(1, 256, 3)
+            reference = ramp.astype(np.float32)
+            reference /= 255
+            if exposure:
+                reference *= 2.0 ** exposure
+            if contrast:
+                reference[:] = (reference - 0.5) * (1 + contrast) + 0.5
+            np.clip(reference, 0, 1, out=reference)
+            reference *= 255
+            np.rint(reference, out=reference)
+            gpu = self._transform(Image.fromarray(ramp, "RGB"), exposure, contrast,
+                                  tile_pixels=256)
+            self._parity[key] = np.array_equal(np.asarray(gpu), reference.astype(np.uint8))
+        if not self._parity[key]:
+            raise ValueError("GPU arithmetic differs from CPU for this recipe")
+
+    def apply_full(self, image: Image.Image, exposure: float, contrast: float) -> Image.Image:
+        self._check_exact_parity(exposure, contrast)
+        result = self._transform(image, exposure, contrast, tile_pixels=1_000_000)
+        self.full_calls += 1
+        return result

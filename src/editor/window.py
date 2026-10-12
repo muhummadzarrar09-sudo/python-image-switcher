@@ -9,6 +9,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from pathlib import Path
 from queue import Empty, Full, Queue
+import os
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -17,6 +18,7 @@ import customtkinter as ctk
 from PIL import Image, ImageColor, ImageTk
 
 from .batch import BatchSession, EDIT_FIELDS
+from .gpu_preview import OpenCLPreview, eligible_export
 from .preview import PreviewRenderer, PreviewRequest
 from .render import STILL_EXTENSIONS, edited_size, source_info, still_photo_frames, _open_source
 from .workflow import export_batch, import_project
@@ -113,6 +115,8 @@ class EditorWindow(ctk.CTkToplevel):
         self._import_closing = threading.Event()
         self._import_errors: list[str] = []
         self._import_job = None
+        self._export_queue: Queue | None = None
+        self._export_poll_job = None
         self.brush_add = True
         self.mask_painting = False
         self.crop_window: CropTools | None = None
@@ -724,7 +728,7 @@ class EditorWindow(ctk.CTkToplevel):
             self._import_cancel.set()
         self._preview_renderer.close()
         for job in (self._preview_job, self._preview_poll_job, self._resize_job,
-                    self._import_job, self._gpu_status_job):
+                    self._import_job, self._gpu_status_job, self._export_poll_job):
             if job is not None:
                 try:
                     self.after_cancel(job)
@@ -798,16 +802,49 @@ class EditorWindow(ctk.CTkToplevel):
         self.batch.rights = dict(rights)
         snapshot = deepcopy(self.batch)
         self.busy = True
+        self._export_directory = directory
         count = len(snapshot.photos) if numbers is None else len(numbers)
-        self.status.configure(text=f"Exporting {count} numbered photo(s), with their manual edits...")
+        self.status.configure(text=f"Exporting 0/{count} numbered photos, including protected edits…")
+        self._export_queue = Queue()  # small progress records, never decoded images
 
         def work():
+            accelerator = None
+            if (os.environ.get("IMAGE_SWITCHER_GPU", "auto").lower() != "off"
+                    and any(eligible_export(photo, snapshot) for photo in snapshot.photos
+                            if numbers is None or photo.number in numbers)):
+                try:
+                    accelerator = OpenCLPreview()
+                except Exception:
+                    pass  # missing driver/runtime: CPU path still exports all photos
             try:
-                results = export_batch(snapshot, directory, numbers=numbers)
-                self.after(0, lambda: self.done(f"Exported {len(results)} lossless masters + .isphoto projects to {directory}"))
+                results = export_batch(
+                    snapshot, directory, numbers=numbers, accelerator=accelerator,
+                    on_exported=lambda number, done, total:
+                        self._export_queue.put(("progress", number, done, total)))
+                accelerated = accelerator.full_calls if accelerator else 0
+                self._export_queue.put(("done", len(results), accelerated, None))
             except Exception as exc:
-                self.after(0, lambda exc=exc: self.failed(exc))
+                self._export_queue.put(("error", exc, None, None))
         threading.Thread(target=work, daemon=True).start()
+        self._export_poll_job = self.after(80, self._poll_export)
+
+    def _poll_export(self):
+        self._export_poll_job = None
+        for _ in range(20):
+            try:
+                kind, first, second, third = self._export_queue.get_nowait()
+            except Empty:
+                break
+            if kind == "progress":
+                self.status.configure(text=f"Exported {second}/{third} · last photo #{first:04d}")
+            elif kind == "done":
+                self.done(f"Exported {first} lossless masters + .isphoto projects to "
+                          f"{self._export_directory}; GPU-adjusted {second}/{first} photos")
+                return
+            elif kind == "error":
+                self.failed(first)
+                return
+        self._export_poll_job = self.after(80, self._poll_export)
 
     def done(self, message):
         self.busy = False

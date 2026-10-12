@@ -16,7 +16,10 @@ import numpy as np
 from PIL import Image
 
 from .batch import BatchSession
+from .gpu_preview import OpenCLPreview
 from .preview import PreviewRenderer, PreviewRequest, process_preview
+from .render import render
+from .workflow import export_batch
 
 
 def installed_gpu_report(path: str) -> dict:
@@ -53,16 +56,39 @@ def installed_gpu_report(path: str) -> dict:
             gpu_image = result[1]
             delta = np.abs(np.asarray(cpu).astype(np.int16) -
                            np.asarray(gpu_image).astype(np.int16))
+            # Exercise the same full-resolution batch/export path used by the
+            # installed UI, not merely an isolated kernel or preview.
+            accelerator = None
+            if worker.gpu_status.startswith("GPU ready"):
+                try:
+                    accelerator = OpenCLPreview()
+                except Exception:
+                    pass
+            cpu_master, _, _ = render(photo, batch)
+            gpu_master, _, _ = render(photo, batch, accelerator=accelerator)
+            export_difference = np.abs(np.asarray(cpu_master).astype(np.int16) -
+                                       np.asarray(gpu_master).astype(np.int16))
+            output = Path(directory) / "exported"
+            results = export_batch(batch, str(output), accelerator=accelerator)
+            if len(results) != 1:
+                raise AssertionError("Diagnostic export did not retain its numbered photo")
+            with Image.open(results[0][1]) as exported:
+                exported_difference = np.abs(np.asarray(cpu_master).astype(np.int16) -
+                                             np.asarray(exported).astype(np.int16))
             report = {"packaged": bool(getattr(sys, "frozen", False)),
                       "gpu_status": worker.gpu_status, "gpu_used_for_generated_preview": result[3],
+                      "gpu_used_for_generated_export": bool(accelerator and accelerator.full_calls),
+                      "gpu_export_error": getattr(accelerator, "error", None),
                       "gpu_error": worker.gpu_error,
                       "cpu_pixel_sha256": hashlib.sha256(cpu.tobytes()).hexdigest(),
                       "preview_pixel_sha256": hashlib.sha256(gpu_image.tobytes()).hexdigest(),
                       "max_channel_difference": int(delta.max()),
                       "differing_channel_count": int(np.count_nonzero(delta)),
                       "total_channels": int(delta.size),
-                      "note": "Generated 512x256 PNG exposure/contrast only. No private photo, "
-                              "full-resolution export or Tk responsiveness measured."}
+                      "export_max_channel_difference": int(export_difference.max()),
+                      "exported_png_max_channel_difference": int(exported_difference.max()),
+                      "note": "Generated 512x256 PNG exposure/contrast and one numbered export only. "
+                              "No private photo, NEF, all-recipe parity or Tk responsiveness measured."}
         finally:
             worker.close()
     destination = Path(path)

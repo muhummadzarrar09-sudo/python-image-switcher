@@ -80,7 +80,7 @@ jobs:
             Write-Host "::error file=installer.iss,line=1::$($_.Exception.Message)"
             exit 1
           }
-          $setup = Resolve-Path '.\dist\ImageSwitcher-Setup-0.2.0-alpha.6.exe'
+          $setup = Resolve-Path '.\dist\ImageSwitcher-Setup-0.2.0-alpha.7.exe'
           $process = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/NORESTART', '/SUPPRESSMSGBOXES') -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Setup failed: $($process.ExitCode)" }
           $directory = Join-Path $env:LOCALAPPDATA 'Programs\Image Switcher'
@@ -97,8 +97,10 @@ jobs:
           $process = Start-Process -FilePath $editor -ArgumentList @('--gpu-report', ('"{0}"' -f $report)) -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installed GPU/CPU-fallback diagnostic failed: $($process.ExitCode)" }
           $diagnostic = Get-Content $report -Raw | ConvertFrom-Json
-          if (-not $diagnostic.packaged -or $diagnostic.max_channel_difference -gt 1) {
-            throw 'Packaged preview/fallback parity check failed'
+          if (-not $diagnostic.packaged -or $diagnostic.max_channel_difference -ne 0 -or
+              $diagnostic.export_max_channel_difference -ne 0 -or
+              $diagnostic.exported_png_max_channel_difference -ne 0) {
+            throw 'Packaged preview/export/fallback parity check failed'
           }
           $uninstaller = Join-Path $directory 'unins000.exe'
           if (-not (Test-Path $uninstaller)) { throw "Uninstaller not found: $uninstaller" }
@@ -113,6 +115,6 @@ jobs:
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
-          name: image-switcher-alpha-0.2.0-alpha.6-unsigned
-          path: dist/ImageSwitcher-Setup-0.2.0-alpha.6.exe
+          name: image-switcher-alpha-0.2.0-alpha.7-unsigned
+          path: dist/ImageSwitcher-Setup-0.2.0-alpha.7.exe
           if-no-files-found: error

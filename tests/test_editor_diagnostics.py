@@ -13,6 +13,9 @@ def test_generated_report_in_cpu_fallback_mode(tmp_path, monkeypatch):
     assert json.loads(path.read_text()) == report
     assert report["gpu_status"] == "CPU (GPU off)"
     assert report["gpu_used_for_generated_preview"] is False
+    assert report["gpu_used_for_generated_export"] is False
+    assert report["export_max_channel_difference"] == 0
+    assert report["exported_png_max_channel_difference"] == 0
     assert report["max_channel_difference"] == 0
     assert report["differing_channel_count"] == 0
     assert report["total_channels"] == 512 * 256 * 3

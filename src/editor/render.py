@@ -206,7 +206,8 @@ def _mask_from_strokes(photo: Photo, size: tuple[int, int]) -> Image.Image:
 
 
 def render(photo: Photo, batch: BatchSession, *, preview: bool = False,
-           preview_size: tuple[int, int] | None = None) -> tuple[Image.Image | np.ndarray, bytes | None, bool]:
+           preview_size: tuple[int, int] | None = None,
+           accelerator=None) -> tuple[Image.Image | np.ndarray, bytes | None, bool]:
     """Render a full-res image, or an explicitly downsampled UI preview.
 
     Return (image, source ICC, 16-bit RAW). Non-RAW outputs are Pillow images;
@@ -245,6 +246,18 @@ def render(photo: Photo, batch: BatchSession, *, preview: bool = False,
             image = ImageOps.mirror(image)
         if not any(values.values()) and not photo.background:
             return image, profile, False  # preserve decoded pixels without float conversion
+        if accelerator is not None and not preview and image.mode == "RGB" and not getattr(accelerator, "failed", False):
+            from .gpu_preview import eligible_export
+            if eligible_export(photo, batch):
+                try:
+                    return accelerator.apply_full(image, values["exposure"],
+                                                  values["contrast"]), profile, False
+                except Exception as exc:
+                    # No partially GPU-rendered image is ever published. Re-do
+                    # this photo on CPU and disable the failed device for the
+                    # rest of this batch; PNG/TIFF fidelity takes priority.
+                    accelerator.failed = True
+                    accelerator.error = str(exc)
         depth = 255
         data = np.asarray(image).astype(np.float32)
         data /= depth
@@ -329,12 +342,12 @@ def render(photo: Photo, batch: BatchSession, *, preview: bool = False,
     return out, profile, False
 
 
-def export_lossless(photo: Photo, batch: BatchSession, path: str) -> str:
+def export_lossless(photo: Photo, batch: BatchSession, path: str, *, accelerator=None) -> str:
     """Save atomically to an explicit lossless PNG/TIFF; never emit JPEG."""
     ext = Path(path).suffix.lower()
     if ext not in (".png", ".tif", ".tiff"):
         raise PhotoRenderError("Lossless master must be PNG or TIFF")
-    image, profile, raw = render(photo, batch)
+    image, profile, raw = render(photo, batch, accelerator=accelerator)
     if raw and ext != ".tiff" and ext != ".tif":
         raise PhotoRenderError("16-bit NEF master currently requires TIFF")
     parent = os.path.dirname(os.path.abspath(path))

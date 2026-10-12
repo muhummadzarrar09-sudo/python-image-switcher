@@ -13,7 +13,8 @@ from .project import create_project, read_project
 from .render import export_lossless, PhotoRenderError
 
 
-def export_batch(batch: BatchSession, directory: str, *, numbers: list[int] | None = None) -> list[tuple[int, str, str]]:
+def export_batch(batch: BatchSession, directory: str, *, numbers: list[int] | None = None,
+                 accelerator=None, on_exported=None) -> list[tuple[int, str, str]]:
     """Export all numbered photos (including protected), or an explicit selection.
 
     Masters are PNG for decoded 8-bit photos and RGB 16-bit TIFF for NEF.
@@ -47,7 +48,7 @@ def export_batch(batch: BatchSession, directory: str, *, numbers: list[int] | No
     for photo, master, project in plans:
         with tempfile.TemporaryDirectory(dir=directory, prefix=".export-") as staging:
             staged = os.path.join(staging, os.path.basename(master))
-            export_lossless(photo, batch, staged)
+            export_lossless(photo, batch, staged, accelerator=accelerator)
             recipe = asdict(photo)
             # Portable: original/background are in archive; strip machine-local paths.
             recipe.pop("source")
@@ -66,6 +67,8 @@ def export_batch(batch: BatchSession, directory: str, *, numbers: list[int] | No
                 os.unlink(master)
                 raise
         result.append((photo.number, master, project))
+        if on_exported is not None:
+            on_exported(photo.number, len(result), len(plans))
     return result
 
 

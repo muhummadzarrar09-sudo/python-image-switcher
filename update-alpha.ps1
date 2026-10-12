@@ -47,12 +47,34 @@ function Find-Python311 {
 
 function Find-InnoCompiler {
     $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-    if ($iscc) { return $iscc.Source }
-    $paths = @(
-        (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
-        (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')
+    if ($iscc -and (Test-Path $iscc.Source)) { return $iscc.Source }
+
+    # winget may install Inno Setup per-user with /CURRENTUSER; that puts it
+    # under LocalAppData\Programs, not Program Files. Do not rely on a refreshed
+    # PATH in the same shell immediately after installing it.
+    $folders = @()
+    if ($env:LOCALAPPDATA) {
+        $folders += (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6')
+        $folders += (Join-Path $env:LOCALAPPDATA 'Inno Setup 6')
+    }
+    if (${env:ProgramFiles(x86)}) { $folders += (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6') }
+    if ($env:ProgramFiles) { $folders += (Join-Path $env:ProgramFiles 'Inno Setup 6') }
+
+    # Inno's own uninstall registration records the installation directory;
+    # use it for customized paths and either per-user or machine installations.
+    $uninstallKeys = @(
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1',
+        'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1'
     )
-    foreach ($candidate in $paths) { if (Test-Path $candidate) { return $candidate } }
+    foreach ($key in $uninstallKeys) {
+        $entry = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
+        if ($entry -and $entry.InstallLocation) { $folders += $entry.InstallLocation }
+    }
+    foreach ($folder in $folders) {
+        $candidate = Join-Path $folder 'ISCC.exe'
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    }
     return $null
 }
 
@@ -65,7 +87,26 @@ if ($ProbeTest) {
         if (Test-Python311 -command $available.Source -prefix @('-c', $errorCode)) {
             throw 'Probe incorrectly accepted a missing runtime'
         }
-        Write-Host 'Missing-runtime probe handled safely.'
+        # Exercise the per-user winget installation path on Windows before
+        # Inno Setup is installed by CI. No real compiler is executed here.
+        if (-not (Get-Command ISCC.exe -ErrorAction SilentlyContinue)) {
+            $oldLocalAppData = $env:LOCALAPPDATA
+            $probeRoot = Join-Path $env:TEMP ('image-switcher-inno-probe-' + [guid]::NewGuid().ToString('N'))
+            try {
+                $env:LOCALAPPDATA = $probeRoot
+                $probeFolder = Join-Path $probeRoot 'Programs\Inno Setup 6'
+                New-Item -ItemType Directory -Path $probeFolder -Force | Out-Null
+                $probeCompiler = Join-Path $probeFolder 'ISCC.exe'
+                Set-Content -LiteralPath $probeCompiler -Value 'probe file'
+                if ((Find-InnoCompiler) -ne $probeCompiler) {
+                    throw 'Per-user Inno Setup compiler was not discovered'
+                }
+            } finally {
+                $env:LOCALAPPDATA = $oldLocalAppData
+                if (Test-Path $probeRoot) { Remove-Item -LiteralPath $probeRoot -Recurse -Force }
+            }
+        }
+        Write-Host 'Missing-runtime and per-user compiler probes handled safely.'
         # Actions' PowerShell wrapper exits with LASTEXITCODE even if a failed
         # native probe was intentional and this script returned normally.
         $global:LASTEXITCODE = 0
@@ -123,7 +164,7 @@ try {
         Write-Host 'Installing Inno Setup 6 via winget...'
         Invoke-Checked 'winget' @('install', '-e', '--id', 'JRSoftware.InnoSetup', '--silent', '--accept-package-agreements', '--accept-source-agreements')
         $compiler = Find-InnoCompiler
-        if (-not $compiler) { throw 'Inno Setup was installed but ISCC.exe was not found. Reopen PowerShell and rerun.' }
+        if (-not $compiler) { throw 'Inno Setup installed, but ISCC.exe could not be located in per-user/system program folders or uninstall registration. Locate ISCC.exe and share its full path; do not reinstall Inno repeatedly.' }
     }
     Invoke-Checked $compiler @('installer.iss')
     $setup = Join-Path $root 'dist\ImageSwitcher-Setup-0.2.0-alpha.1.exe'

@@ -21,13 +21,13 @@ The user's Windows 11 report: **15.7 GiB RAM**, Intel Iris Xe (`32.0.101.6790`) 
 
 The source checkout now contains an **experimental, explicitly opt-in** OpenCL fast path for canvas-size, 8-bit RGB **exposure and/or contrast only**. It runs inside the existing coalescing preview worker and labels a result `experimental GPU` only if that request really used the GPU. Unsupported edits (including Sharpness, backgrounds, crop/rotation, alpha, NEF), unavailable devices or runtime failures use the unchanged CPU preview. Full-resolution render/export, source bytes and projects **always** use CPU. GPU is **off by default**, pyopencl is not a mandatory dependency or validated part of the PyInstaller/installer build. This cannot be called completed MUH-56: actual integrated UI speed, varying slider parity, installer packaging, 16-bit/ICC and CPU fallback still require coverage.
 
-Before opting in, run the source-checkout integrated comparison on your real laptop after pulling:
+The user ran `scripts/probe_integrated_preview.py` on their RTX 4070 laptop at a 1200×800 preview size: **CPU median 0.03448 s → GPU opt-in median 0.01564 s** (about **2.2×** faster for this complete worker preview, including JPEG draft/decode and waiting), with the **same SHA-256** and **0 differing channels of 2,880,000**. `gpu_used: true`, `gpu_error: null`. This verifies this fixture and exposure/contrast recipe on their hardware, **not** Tk repaint latency, every slider value, every input format, installed-app support or full-resolution export. The probe is repeatable after pulling:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\probe_integrated_preview.py
 ```
 
-It compares generated fixture JPEG preview pixels/hash and measured complete CPU-vs-GPU preview render including JPEG draft/decode and worker wait; if GPU was not used or a channel differs by more than 1, it returns failure. It does not display a UI or export a photo. **Share the full JSON** before treating GPU preview as reliable. To try the source editor experimentally (not the installed executable), set the environment variable for that PowerShell session and open it:
+It does not display a UI or export a photo. To try the source editor experimentally (not the installed executable), set the environment variable for that PowerShell session and open it:
 
 ```powershell
 $env:IMAGE_SWITCHER_EXPERIMENTAL_GPU_PREVIEW = '1'

@@ -92,8 +92,16 @@ def still_photo_frames(path: str) -> range:
         raise PhotoRenderError(f"Cannot read still photo: {exc}") from exc
 
 
+def _preview_dimensions(size: tuple[int, int] | None) -> tuple[int, int]:
+    """A UI preview is never allowed to expand a source or affect export."""
+    if size is None:
+        return (1400, 1000)
+    return (max(1, min(1400, int(size[0]))), max(1, min(1000, int(size[1]))))
+
+
 def _open_source(path: str, *, preview: bool = False,
-                 frame_index: int | None = None) -> tuple[Image.Image | np.ndarray, bytes | None, bool]:
+                 frame_index: int | None = None,
+                 preview_size: tuple[int, int] | None = None) -> tuple[Image.Image | np.ndarray, bytes | None, bool]:
     ext = Path(path).suffix.lower()
     if ext not in STILL_EXTENSIONS:
         raise PhotoRenderError(f"{ext or 'Unknown file'} is not a supported still-photo extension")
@@ -111,8 +119,11 @@ def _open_source(path: str, *, preview: bool = False,
                         thumb = raw.extract_thumb()
                         if thumb.format == rawpy.ThumbFormat.JPEG:
                             with Image.open(io.BytesIO(thumb.data)) as image:
-                                return ImageOps.exif_transpose(image).convert("RGB"), None, False
-                        return Image.fromarray(thumb.data).convert("RGB"), None, False
+                                result = ImageOps.exif_transpose(image).convert("RGB")
+                        else:
+                            result = Image.fromarray(thumb.data).convert("RGB")
+                        result.thumbnail(_preview_dimensions(preview_size), Image.Resampling.LANCZOS)
+                        return result, None, False
                     except Exception:
                         pass
                 # RawPy defaults to output sRGB; we embed an sRGB profile on TIFF export.
@@ -127,9 +138,13 @@ def _open_source(path: str, *, preview: bool = False,
                 raise PhotoRenderError("Photo exceeds the current safe processing size")
             _check_depth(path, image)
             profile = image.info.get("icc_profile")
-            if preview:
-                image.thumbnail((1400, 1000), Image.Resampling.LANCZOS)
+            if preview and image.format in ("JPEG", "MPO"):
+                # JPEG draft decodes a smaller DCT image before conversion;
+                # only previews use this approximation, never exported masters.
+                image.draft("RGB", _preview_dimensions(preview_size))
             image = ImageOps.exif_transpose(image)
+            if preview:
+                image.thumbnail(_preview_dimensions(preview_size), Image.Resampling.LANCZOS)
             has_alpha = "A" in image.getbands() or "transparency" in image.info
             return image.convert("RGBA" if has_alpha else "RGB"), profile, False
     except PhotoRenderError:
@@ -174,13 +189,15 @@ def _mask_from_strokes(photo: Photo, size: tuple[int, int]) -> Image.Image:
     return mask
 
 
-def render(photo: Photo, batch: BatchSession, *, preview: bool = False) -> tuple[Image.Image | np.ndarray, bytes | None, bool]:
+def render(photo: Photo, batch: BatchSession, *, preview: bool = False,
+           preview_size: tuple[int, int] | None = None) -> tuple[Image.Image | np.ndarray, bytes | None, bool]:
     """Render a full-res image, or an explicitly downsampled UI preview.
 
     Return (image, source ICC, 16-bit RAW). Non-RAW outputs are Pillow images;
     16-bit NEF outputs are RGB uint16 ndarrays (never coerced to 8 bits).
     """
-    image, profile, raw = _open_source(photo.source, preview=preview, frame_index=photo.frame_index)
+    image, profile, raw = _open_source(photo.source, preview=preview, frame_index=photo.frame_index,
+                                       preview_size=preview_size)
     values = batch.effective_settings(photo.number)
     if raw:
         pixels = image
@@ -196,8 +213,11 @@ def render(photo: Photo, batch: BatchSession, *, preview: bool = False) -> tuple
             pixels = np.fliplr(pixels)
         if photo.background or photo.mask_strokes:
             raise PhotoRenderError("16-bit NEF background masking is not yet implemented; no downgraded export was written")
+        if not any(values.values()):
+            return pixels, profile, True  # no full-frame float buffers for identity
         depth = 65535
-        data = pixels.astype(np.float32) / depth
+        data = pixels.astype(np.float32)
+        data /= depth
     else:
         if photo.crop:
             x0, y0, x1, y1 = photo.crop
@@ -207,8 +227,11 @@ def render(photo: Photo, batch: BatchSession, *, preview: bool = False) -> tuple
             image = image.rotate(photo.rotation, expand=True)
         if photo.flip_horizontal:
             image = ImageOps.mirror(image)
-        data = np.asarray(image).astype(np.float32) / 255.0
+        if not any(values.values()) and not photo.background:
+            return image, profile, False  # preserve decoded pixels without float conversion
         depth = 255
+        data = np.asarray(image).astype(np.float32)
+        data /= depth
     color = data[:, :, :3]
     if values["exposure"]:
         color *= 2.0 ** values["exposure"]
@@ -216,16 +239,18 @@ def render(photo: Photo, batch: BatchSession, *, preview: bool = False) -> tuple
         color += values["brightness"] * 0.5
     if values["contrast"]:
         color[:] = (color - 0.5) * (1 + values["contrast"]) + 0.5
-    luminance = color.mean(axis=2, keepdims=True)
-    if values["highlights"]:
-        color += values["highlights"] * np.maximum(0, luminance - 0.5) * 0.9
-    if values["shadows"]:
-        color += values["shadows"] * np.maximum(0, 0.5 - luminance) * 0.9
-    if values["saturation"]:
-        color[:] = luminance + (color - luminance) * (1 + values["saturation"])
-    color[:, :, 0] += values["warmth"] * 0.12 + values["tint"] * 0.07
-    color[:, :, 2] -= values["warmth"] * 0.12 - values["tint"] * 0.07
-    color[:, :, 1] -= values["tint"] * 0.07
+    if values["highlights"] or values["shadows"] or values["saturation"]:
+        luminance = color.mean(axis=2, keepdims=True)
+        if values["highlights"]:
+            color += values["highlights"] * np.maximum(0, luminance - 0.5) * 0.9
+        if values["shadows"]:
+            color += values["shadows"] * np.maximum(0, 0.5 - luminance) * 0.9
+        if values["saturation"]:
+            color[:] = luminance + (color - luminance) * (1 + values["saturation"])
+    if values["warmth"] or values["tint"]:
+        color[:, :, 0] += values["warmth"] * 0.12 + values["tint"] * 0.07
+        color[:, :, 2] -= values["warmth"] * 0.12 - values["tint"] * 0.07
+        color[:, :, 1] -= values["tint"] * 0.07
     if values["vignette"]:
         h, w = color.shape[:2]
         yy, xx = np.ogrid[-1:1:complex(h), -1:1:complex(w)]
@@ -235,12 +260,24 @@ def render(photo: Photo, batch: BatchSession, *, preview: bool = False) -> tuple
     if values["sharpness"]:
         # Unsharp mask in the current float32 working depth, including 16-bit RAW.
         padded = np.pad(color, ((1, 1), (1, 1), (0, 0)), mode="edge")
-        blurred = (color + padded[:-2, 1:-1] + padded[2:, 1:-1]
-                   + padded[1:-1, :-2] + padded[1:-1, 2:]) / 5
-        color[:] = np.clip(color + (color - blurred) * values["sharpness"], 0, 1)
+        # One reusable float buffer instead of five full-frame temporaries.
+        blurred = color.copy()
+        np.add(blurred, padded[:-2, 1:-1], out=blurred)
+        np.add(blurred, padded[2:, 1:-1], out=blurred)
+        np.add(blurred, padded[1:-1, :-2], out=blurred)
+        np.add(blurred, padded[1:-1, 2:], out=blurred)
+        np.divide(blurred, 5, out=blurred)
+        np.subtract(color, blurred, out=blurred)
+        blurred *= values["sharpness"]
+        np.add(color, blurred, out=color)
+        np.clip(color, 0, 1, out=color)
+    # Quantize in the existing float buffer instead of allocating two more
+    # full-resolution float arrays just to round the export pixels.
+    data *= depth
+    np.rint(data, out=data)
     if raw:
-        return np.round(color * depth).astype(np.uint16), profile, True
-    out = Image.fromarray(np.round(data * depth).astype(np.uint8),
+        return data.astype(np.uint16), profile, True
+    out = Image.fromarray(data.astype(np.uint8),
                           "RGBA" if data.shape[2] == 4 else "RGB")
     if photo.background:
         mode = photo.background.get("mode")

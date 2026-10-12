@@ -21,7 +21,13 @@ jobs:
         shell: powershell
         run: .\update-alpha.ps1 -DependenciesOnly
       - name: Smoke-test real desktop controls and export dialog
-        run: .\.venv\Scripts\python.exe -m pytest -q tests/test_editor_window.py tests/test_editor_import.py tests/test_capture_editor_baseline.py
+        run: .\.venv\Scripts\python.exe -m pytest -q tests/test_editor_window.py tests/test_editor_import.py tests/test_editor_preview.py tests/test_capture_editor_baseline.py
+      - name: Profile full-resolution CPU rendering and memory (diagnostic)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ui-captures\runner | Out-Null
+          & .\.venv\Scripts\python.exe scripts\benchmark_editor.py --size 2400x1600 | Tee-Object -FilePath ui-captures\runner\benchmark.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Capture Windows UI smoke states (AI test fixture, not approved baselines)
         shell: pwsh
         run: |
@@ -61,7 +67,7 @@ jobs:
             Write-Host "::error file=installer.iss,line=1::$($_.Exception.Message)"
             exit 1
           }
-          $setup = Resolve-Path '.\dist\ImageSwitcher-Setup-0.2.0-alpha.4.exe'
+          $setup = Resolve-Path '.\dist\ImageSwitcher-Setup-0.2.0-alpha.5.exe'
           $process = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/NORESTART', '/SUPPRESSMSGBOXES') -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Setup failed: $($process.ExitCode)" }
           $directory = Join-Path $env:LOCALAPPDATA 'Programs\Image Switcher'
@@ -81,6 +87,6 @@ jobs:
           if (Test-Path $editor) { throw "Installed editor remained after uninstall: $editor" }
       - uses: actions/upload-artifact@v4
         with:
-          name: image-switcher-alpha-0.2.0-alpha.4-unsigned
-          path: dist/ImageSwitcher-Setup-0.2.0-alpha.4.exe
+          name: image-switcher-alpha-0.2.0-alpha.5-unsigned
+          path: dist/ImageSwitcher-Setup-0.2.0-alpha.5.exe
           if-no-files-found: error

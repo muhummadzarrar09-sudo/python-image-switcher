@@ -16,7 +16,8 @@ import customtkinter as ctk
 from PIL import Image, ImageColor, ImageTk
 
 from .batch import BatchSession, EDIT_FIELDS
-from .render import STILL_EXTENSIONS, render, source_info, still_photo_frames, _open_source
+from .preview import PreviewRenderer, PreviewRequest
+from .render import STILL_EXTENSIONS, source_info, still_photo_frames, _open_source
 from .workflow import export_batch, import_project
 from .version import ALPHA_VERSION
 
@@ -110,9 +111,16 @@ class EditorWindow(ctk.CTkToplevel):
         self.background_window: BackgroundTools | None = None
         self._preview_image = None
         self._thumbnail_cache: dict[str, ctk.CTkImage] = {}
+        self._tiles: dict[str, tuple[ctk.CTkFrame, ctk.CTkButton, ctk.CTkLabel]] = {}
+        self._tile_states: dict[str, tuple[bool, bool, str]] = {}
         self.view_mode = ctk.StringVar(value="After")
         self._canvas_bounds = (0, 0, 0, 0)
         self._resize_job = None
+        self._preview_renderer = PreviewRenderer()
+        self._preview_generation = 0
+        self._preview_job = None
+        self._preview_poll_job = None
+        self._displayed_number: int | None = None
         self._syncing_sliders = False
         self.sliders: dict[str, ctk.CTkSlider] = {}
         self.value_labels: dict[str, ctk.CTkLabel] = {}
@@ -323,29 +331,44 @@ class EditorWindow(ctk.CTkToplevel):
         return self._thumbnail_cache[photo.id]
 
     def refresh_list(self):
-        for child in self.items.winfo_children():
-            child.destroy()
+        """Retain rail widgets/images when selecting or editing another photo."""
+        live = {photo.id for photo in self.batch.photos}
+        for photo_id in set(self._tiles) - live:
+            self._tiles.pop(photo_id)[0].destroy()
+            self._tile_states.pop(photo_id, None)
+            self._thumbnail_cache.pop(photo_id, None)
         self.batch_count.configure(text=str(len(self.batch.photos)))
         for photo in self.batch.photos:
+            if photo.id not in self._tiles:
+                tile = ctk.CTkFrame(self.items, height=84, corner_radius=4,
+                                    fg_color="#282c32")
+                tile.pack(fill="x", pady=3)
+                tile.pack_propagate(False)
+                ctk.CTkLabel(tile, text=str(photo.number), width=23, height=21,
+                             corner_radius=3, fg_color="#101317", text_color="#e0e5ed",
+                             font=ctk.CTkFont(size=10)).pack(side="left", padx=(2, 2))
+                thumbnail_column = ctk.CTkFrame(tile, fg_color="transparent")
+                thumbnail_column.pack(side="left", fill="y")
+                button = ctk.CTkButton(thumbnail_column, text="", image=self.thumbnail(photo),
+                                       width=104, height=61, border_width=0,
+                                       border_color="#5195e9", fg_color="#30353c",
+                                       hover_color="#375273", corner_radius=3,
+                                       command=lambda n=photo.number: self.select(n))
+                button.pack()
+                caption = ctk.CTkLabel(thumbnail_column, text="", width=104, height=18,
+                                       anchor="w", text_color="#abb3bd",
+                                       font=ctk.CTkFont(size=9))
+                caption.pack()
+                self._tiles[photo.id] = (tile, button, caption)
             selected = photo.number == self.current
-            tile = ctk.CTkFrame(self.items, height=84, corner_radius=4,
-                                fg_color="#23446b" if selected else "#282c32")
-            tile.pack(fill="x", pady=3)
-            tile.pack_propagate(False)
-            ctk.CTkLabel(tile, text=str(photo.number), width=23, height=21,
-                         corner_radius=3, fg_color="#101317", text_color="#e0e5ed",
-                         font=ctk.CTkFont(size=10)).pack(side="left", padx=(2, 2))
-            thumbnail_column = ctk.CTkFrame(tile, fg_color="transparent")
-            thumbnail_column.pack(side="left", fill="y")
-            ctk.CTkButton(thumbnail_column, text="", image=self.thumbnail(photo),
-                          width=104, height=61, border_width=2 if selected else 0,
-                          border_color="#5195e9", fg_color="#30353c",
-                          hover_color="#375273", corner_radius=3,
-                          command=lambda n=photo.number: self.select(n)).pack()
-            ctk.CTkLabel(thumbnail_column,
-                         text=("LOCKED · " if photo.protected else "") + Path(photo.source).stem[:11],
-                         width=104, height=18, anchor="w", text_color="#8dc0ff" if photo.protected else "#abb3bd",
-                         font=ctk.CTkFont(size=9)).pack()
+            state = (selected, photo.protected, Path(photo.source).stem[:11])
+            if self._tile_states.get(photo.id) != state:
+                tile, button, caption = self._tiles[photo.id]
+                tile.configure(fg_color="#23446b" if selected else "#282c32")
+                button.configure(border_width=2 if selected else 0)
+                caption.configure(text=("LOCKED · " if photo.protected else "") + state[2],
+                                  text_color="#8dc0ff" if photo.protected else "#abb3bd")
+                self._tile_states[photo.id] = state
         if self.batch.photos:
             self.status.configure(text=f"{len(self.batch.photos)} photos · protected: {self.batch.excluded_numbers} · full batch includes all")
         else:
@@ -521,36 +544,95 @@ class EditorWindow(ctk.CTkToplevel):
         self._resize_job = self.after(150, self.show_current)
 
     def show_current(self):
+        """Schedule the latest canvas-size preview, without blocking Tk."""
         self._resize_job = None
-        self.canvas.delete("all")
+        self._preview_generation += 1
+        if self._preview_job is not None:
+            self.after_cancel(self._preview_job)
+            self._preview_job = None
         canvas_w = max(100, self.canvas.winfo_width())
         canvas_h = max(100, self.canvas.winfo_height())
         if self.current is None:
+            self._preview_image = None
+            self._displayed_number = None
             self._canvas_bounds = (0, 0, 0, 0)
+            self.canvas.delete("all")
             self.canvas.create_text(canvas_w//2, canvas_h//2, text="Add still photos to begin",
                                     fill="#888", font=("Arial", 16))
             return
+        if self._displayed_number != self.current:
+            self.canvas.delete("all")
+            self._canvas_bounds = (0, 0, 0, 0)
+            self.canvas.create_text(canvas_w//2, canvas_h//2, text="Rendering preview…",
+                                    fill="#abb3bd", font=("Arial", 13))
+        # A single slider drag can send dozens of events. Keep only its final
+        # value and retain the previous visible preview until the new one lands.
+        self._preview_job = self.after(75, self._submit_preview)
+
+    def _submit_preview(self):
+        self._preview_job = None
+        if self.current is None:
+            return
         try:
-            photo = self.selected_photo()
-            before = self.view_mode.get() == "Before"
-            if before:
-                image, _, _ = _open_source(photo.source, preview=True, frame_index=photo.frame_index)
-            else:
-                image, _, _ = render(photo, self.batch, preview=True)
-            if not isinstance(image, Image.Image):
-                image = Image.fromarray((image / 257).astype("uint8"))
+            photo = deepcopy(self.selected_photo())
+            settings = BatchSession(photos=[photo], batch_settings=dict(self.batch.batch_settings))
+            request = PreviewRequest(self._preview_generation, photo, settings,
+                                     self.view_mode.get() == "Before",
+                                     (max(1, self.canvas.winfo_width()-20),
+                                      max(1, self.canvas.winfo_height()-20)))
+            self._preview_renderer.submit(request)
+            if self._preview_poll_job is None:
+                self._preview_poll_job = self.after(40, self._poll_preview)
+        except Exception as exc:
+            self._show_preview_error(str(exc))
+
+    def _poll_preview(self):
+        self._preview_poll_job = None
+        if self.current is None:
+            return
+        result = self._preview_renderer.result()
+        if result is None or result[0] != self._preview_generation:
+            self._preview_poll_job = self.after(40, self._poll_preview)
+            return
+        _, image, error = result
+        if error:
+            self._show_preview_error(error)
+            return
+        try:
+            canvas_w = max(100, self.canvas.winfo_width())
+            canvas_h = max(100, self.canvas.winfo_height())
             image.thumbnail((canvas_w-20, canvas_h-20), Image.Resampling.LANCZOS)
             self._preview_image = ImageTk.PhotoImage(image)
             width, height = image.size
             left, top = (canvas_w-width)//2, (canvas_h-height)//2
             self._canvas_bounds = (left, top, width, height)
+            self.canvas.delete("all")
             self.canvas.create_image(left, top, anchor="nw", image=self._preview_image)
-            state = "🔒 Protected" if photo.protected else "Batch"
-            kind = "Source preview" if before else "Edited preview"
+            photo = self.selected_photo()
+            self._displayed_number = photo.number
+            state = "Protected" if photo.protected else "Batch"
+            kind = "Source preview" if self.view_mode.get() == "Before" else "Edited preview"
             self.status.configure(text=f"#{photo.number:04d} · {state} · {kind} · {Path(photo.source).name[:28]}")
         except Exception as exc:
-            self._canvas_bounds = (0, 0, 0, 0)
-            self.canvas.create_text(10, 20, anchor="nw", fill="orange", text=str(exc)[:105])
+            self._show_preview_error(str(exc))
+
+    def _show_preview_error(self, error: str):
+        self._canvas_bounds = (0, 0, 0, 0)
+        self.canvas.delete("all")
+        self.canvas.create_text(10, 20, anchor="nw", fill="orange", text=error[:105])
+        self.status.configure(text=f"Preview failed: {error[:80]}")
+
+    def destroy(self):
+        # Workers never call Tk. Invalidate pending previews before destroying
+        # the canvas so a late result cannot draw into a dead widget.
+        self._preview_renderer.close()
+        for job in (self._preview_job, self._preview_poll_job, self._resize_job):
+            if job is not None:
+                try:
+                    self.after_cancel(job)
+                except tk.TclError:
+                    pass
+        super().destroy()
 
     def save_session(self):
         path = self.session_path or filedialog.asksaveasfilename(parent=self, defaultextension=".isbatch",
@@ -571,6 +653,10 @@ class EditorWindow(ctk.CTkToplevel):
                 self.close_crop_tools()
                 self.close_background_tools()
                 self.batch = loaded
+                for tile, _, _ in self._tiles.values():
+                    tile.destroy()
+                self._tiles.clear()
+                self._tile_states.clear()
                 self._thumbnail_cache.clear()
                 self.session_path = path
                 self.current = self.batch.photos[0].number if self.batch.photos else None

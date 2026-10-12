@@ -2,7 +2,7 @@
 ; Build first: python build_editor.py
 ; Then compile with Inno Setup 6: iscc installer.iss
 #define MyAppName "Image Switcher"
-#define MyAppVersion "0.2.0-alpha.4"
+#define MyAppVersion "0.2.0-alpha.5"
 #define MyAppPublisher "Image Switcher Team"
 #define MyAppURL "https://github.com/muhummadzarrar09-sudo/python-image-switcher"
 #define MyAppExeName "ImageSwitcherEditor.exe"

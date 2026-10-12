@@ -21,7 +21,19 @@ jobs:
         shell: powershell
         run: .\update-alpha.ps1 -DependenciesOnly
       - name: Smoke-test real desktop controls and export dialog
-        run: .\.venv\Scripts\python.exe -m pytest -q tests/test_editor_window.py
+        run: .\.venv\Scripts\python.exe -m pytest -q tests/test_editor_window.py tests/test_capture_editor_baseline.py
+      - name: Capture Windows UI smoke states (synthetic fixture, not approved baselines)
+        shell: pwsh
+        run: |
+          & .\.venv\Scripts\python.exe -c "from pathlib import Path; from PIL import Image; p=Path('temp/ui-fixture.png'); p.parent.mkdir(exist_ok=True); Image.new('RGB', (800, 500), (88, 104, 128)).save(p)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\.venv\Scripts\python.exe scripts\capture_editor_baseline.py --photo temp\ui-fixture.png --output ui-captures\runner --wait-ms 500
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-ui-smoke-captures
+          path: ui-captures/runner/
+          if-no-files-found: error
       - name: Build windowed alpha executable
         run: |
           .\.venv\Scripts\python.exe build_editor.py 2>&1 | Tee-Object -FilePath build-output.txt

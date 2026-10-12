@@ -49,7 +49,7 @@ class EditorWindow(ctk.CTkToplevel):
 
         # The selected export concept is the visual reference: compact dark
         # chrome, a thumbnail rail, large photo surface, and direct adjustments.
-        header = ctk.CTkFrame(self, height=56, fg_color="#1a1c21", corner_radius=0)
+        header = self.header = ctk.CTkFrame(self, height=56, fg_color="#1a1c21", corner_radius=0)
         header.grid(row=0, column=0, columnspan=3, sticky="ew")
         header.grid_propagate(False)
         ctk.CTkLabel(header, text="IS", width=33, height=33, fg_color="#173a68",
@@ -59,7 +59,7 @@ class EditorWindow(ctk.CTkToplevel):
         ctk.CTkButton(header, text="Export", width=110, height=34, fg_color="#19539a",
                       hover_color="#2568ba", command=self.export).pack(side="right", padx=14)
 
-        toolbar = ctk.CTkFrame(self, height=51, fg_color="#202329", corner_radius=0)
+        toolbar = self.toolbar = ctk.CTkFrame(self, height=51, fg_color="#202329", corner_radius=0)
         toolbar.grid(row=1, column=0, columnspan=3, sticky="ew")
         toolbar.grid_propagate(False)
         for text, action in (("+  Add photos", self.add_files), ("Open batch", self.open_session),
@@ -74,7 +74,7 @@ class EditorWindow(ctk.CTkToplevel):
         ctk.CTkButton(toolbar, text="Unlock", command=self.unlock, width=70, height=32,
                       fg_color="#32363e", hover_color="#414955").pack(side="right", padx=3)
 
-        sidebar = ctk.CTkFrame(self, width=188, fg_color="#21252b", corner_radius=0)
+        sidebar = self.sidebar = ctk.CTkFrame(self, width=188, fg_color="#21252b", corner_radius=0)
         sidebar.grid(row=2, column=0, sticky="nsew", padx=(7, 3), pady=(5, 7))
         sidebar.grid_propagate(False)
         rail_top = ctk.CTkFrame(sidebar, fg_color="transparent")
@@ -89,7 +89,7 @@ class EditorWindow(ctk.CTkToplevel):
         ctk.CTkLabel(sidebar, text="🔒 Protected edits stay in the batch",
                      text_color="#aab0b9", wraplength=175, font=ctk.CTkFont(size=10)).pack(pady=8)
 
-        workspace = ctk.CTkFrame(self, fg_color="#17191d", corner_radius=0)
+        workspace = self.workspace = ctk.CTkFrame(self, fg_color="#17191d", corner_radius=0)
         workspace.grid(row=2, column=1, sticky="nsew", padx=(0, 3), pady=(5, 7))
         workspace.grid_rowconfigure(0, weight=1)
         workspace.grid_columnconfigure(0, weight=1)
@@ -108,7 +108,7 @@ class EditorWindow(ctk.CTkToplevel):
                                width=138, height=30, selected_color="#205da7",
                                command=lambda _: self.show_current()).pack(side="right", padx=5, pady=8)
 
-        panel = ctk.CTkScrollableFrame(self, width=267, fg_color="#272c33", corner_radius=0)
+        panel = self.panel = ctk.CTkScrollableFrame(self, width=267, fg_color="#272c33", corner_radius=0)
         panel.grid(row=2, column=2, sticky="ns", padx=(3, 8), pady=(5, 7))
         ctk.CTkLabel(panel, text="ADJUSTMENTS", anchor="w", text_color="#c9ced7",
                      font=ctk.CTkFont(size=12, weight="bold")).pack(fill="x", padx=12, pady=(14, 17))

@@ -27,13 +27,19 @@ jobs:
         run: |
           & .\.venv\Scripts\python.exe -c "from pathlib import Path; from PIL import Image; p=Path('temp/ui-fixture.png'); p.parent.mkdir(exist_ok=True); Image.new('RGB', (800, 500), (88, 104, 128)).save(p)"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & .\.venv\Scripts\python.exe scripts\capture_editor_baseline.py --photo temp\ui-fixture.png --output ui-captures\runner --wait-ms 500
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force ui-captures\runner | Out-Null
+          & .\.venv\Scripts\python.exe scripts\capture_editor_baseline.py --photo temp\ui-fixture.png --output ui-captures\runner --wait-ms 500 *> ui-captures\runner\capture.log
+          if ($LASTEXITCODE -ne 0) {
+            $tail = (Get-Content ui-captures\runner\capture.log -Tail 28) -join '%0A'
+            Write-Host "::error file=scripts/capture_editor_baseline.py,line=1::$tail"
+            exit 1
+          }
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: windows-ui-smoke-captures
           path: ui-captures/runner/
-          if-no-files-found: error
+          if-no-files-found: warn
       - name: Build windowed alpha executable
         run: |
           .\.venv\Scripts\python.exe build_editor.py 2>&1 | Tee-Object -FilePath build-output.txt

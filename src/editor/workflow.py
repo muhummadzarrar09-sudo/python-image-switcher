@@ -13,17 +13,28 @@ from .project import create_project, read_project
 from .render import export_lossless, PhotoRenderError
 
 
-def export_batch(batch: BatchSession, directory: str) -> list[tuple[int, str, str]]:
-    """Export every photo, including protected ones, without overwriting anything.
+def export_batch(batch: BatchSession, directory: str, *, numbers: list[int] | None = None) -> list[tuple[int, str, str]]:
+    """Export all numbered photos (including protected), or an explicit selection.
 
     Masters are PNG for decoded 8-bit photos and RGB 16-bit TIFF for NEF.
     Returns [(stable number, master path, project path)]. On failure, already
     exported photos remain; the raised error identifies the failed operation.
     """
+    if numbers is None:
+        photos = batch.photos
+    else:
+        if not numbers or len(set(numbers)) != len(numbers):
+            raise ValueError("Choose distinct numbered photos to export")
+        selected = set(numbers)
+        photos = [photo for photo in batch.photos if photo.number in selected]
+        if len(photos) != len(numbers):
+            raise ValueError("An export number is not in this batch")
+    if not photos:
+        raise ValueError("Add still photos before exporting")
     os.makedirs(directory, exist_ok=True)
     directory = os.path.abspath(directory)
     plans = []
-    for photo in batch.photos:
+    for photo in photos:
         basename = re.sub(r"[^\w.-]+", "_", Path(photo.source).stem)[:80] or "photo"
         stem = f"{photo.number:04d}-{basename}"
         extension = ".tiff" if Path(photo.source).suffix.lower() == ".nef" else ".png"

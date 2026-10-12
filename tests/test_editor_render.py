@@ -105,6 +105,24 @@ def test_batch_exports_every_photo_and_reopens_project(tmp_path):
     assert render(imported, restored)[0].size == (40, 30)
 
 
+def test_explicit_selected_export_keeps_stable_number_and_avoids_other_photos(tmp_path):
+    batch, first, _ = sample(tmp_path)
+    second = tmp_path / "other.png"
+    Image.new("RGB", (15, 12), "red").save(second)
+    chosen = batch.add_photo(str(second))
+    batch.edit_photo(chosen.number, "contrast", 0.2)
+    output = tmp_path / "selected"
+    result = export_batch(batch, str(output), numbers=[chosen.number])
+    assert [number for number, _, _ in result] == [chosen.number]
+    assert read_project(result[0][2]).photo_number == chosen.number
+    assert sorted(p.name for p in output.iterdir()) == ["0002-other.isphoto", "0002-other.png"]
+    assert [p.number for p in batch.photos] == [first.number, chosen.number]
+    with pytest.raises(ValueError, match="not in this batch"):
+        export_batch(batch, str(tmp_path / "bad"), numbers=[99])
+    with pytest.raises(ValueError, match="distinct"):
+        export_batch(batch, str(tmp_path / "bad"), numbers=[2, 2])
+
+
 def test_project_embeds_supplied_background_for_portable_reedit(tmp_path):
     batch, photo, _ = sample(tmp_path)
     background = tmp_path / "replacement.png"

@@ -20,6 +20,8 @@ jobs:
       - name: Install alpha dependencies and verify via updater
         shell: powershell
         run: .\update-alpha.ps1 -DependenciesOnly
+      - name: Smoke-test real desktop controls and export dialog
+        run: .\.venv\Scripts\python.exe -m pytest -q tests/test_editor_window.py
       - name: Build windowed alpha executable
         run: |
           .\.venv\Scripts\python.exe build_editor.py 2>&1 | Tee-Object -FilePath build-output.txt

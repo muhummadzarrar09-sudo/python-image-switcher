@@ -31,6 +31,21 @@ jobs:
         run: choco install innosetup --no-progress -y
       - name: Build unsigned alpha installer
         run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer.iss'
+      - name: Install, smoke-test and uninstall alpha on the Windows runner
+        run: |
+          $setup = Resolve-Path '.\dist\ImageSwitcher-Setup-0.2.0-alpha.1.exe'
+          $process = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/NORESTART', '/SUPPRESSMSGBOXES') -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Setup failed: $($process.ExitCode)" }
+          $directory = Join-Path $env:LOCALAPPDATA 'Programs\Image Switcher'
+          $editor = Join-Path $directory 'ImageSwitcherEditor.exe'
+          if (-not (Test-Path $editor)) { throw "Installed editor not found: $editor" }
+          & $editor --editor-self-test
+          if ($LASTEXITCODE -ne 0) { throw "Installed editor smoke test failed: $LASTEXITCODE" }
+          $uninstaller = Join-Path $directory 'unins000.exe'
+          if (-not (Test-Path $uninstaller)) { throw "Uninstaller not found: $uninstaller" }
+          $process = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT', '/NORESTART') -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Uninstall failed: $($process.ExitCode)" }
+          if (Test-Path $editor) { throw "Installed editor remained after uninstall: $editor" }
       - uses: actions/upload-artifact@v4
         with:
           name: image-switcher-alpha-0.2.0-alpha.1-unsigned

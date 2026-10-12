@@ -30,7 +30,7 @@ py -3.11 scripts/update_alpha.py
 .\dist\ImageSwitcher-Setup-0.2.0-alpha.1.exe
 ```
 
-The installer can be unsigned and show an unknown-publisher warning; proceed only if you trust this checkout. A green CI run checks packaging and a headless executable on a Windows runner; it is **not** proof of GUI functionality, camera compatibility, or clean Windows 11 installation. The app cannot be remotely installed on your personal PC from this sandbox.
+The installer can be unsigned and show an unknown-publisher warning; proceed only if you trust this checkout. The Windows workflow builds the installer, silently installs it on its disposable runner, smoke-tests the installed executable and uninstalls it. That is **not** proof of GUI functionality, camera compatibility, or clean Windows 11 installation. The app cannot be remotely installed on your personal PC from this sandbox.
 
 ## Legacy converter (separate)
 

@@ -7,8 +7,7 @@ import pytest
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Tk desktop smoke test runs on Windows CI")
 
 
-def test_named_adjustment_sliders_and_export_dialog_do_not_write_early(tmp_path):
-    import customtkinter as ctk
+def test_named_adjustment_sliders_and_export_dialog_do_not_write_early(tmp_path, tk_root):
     from PIL import Image
 
     from src.editor.batch import EDIT_FIELDS
@@ -16,8 +15,7 @@ def test_named_adjustment_sliders_and_export_dialog_do_not_write_early(tmp_path)
 
     source = tmp_path / "product.png"
     Image.new("RGB", (30, 24), (100, 120, 140)).save(source)
-    root = ctk.CTk()
-    root.withdraw()
+    root = tk_root
     editor = None
     dialog = None
     try:
@@ -67,11 +65,9 @@ def test_named_adjustment_sliders_and_export_dialog_do_not_write_early(tmp_path)
             dialog.close()
         if editor and editor.winfo_exists():
             editor.destroy()
-        root.destroy()
 
 
-def test_latest_preview_wins_after_fast_selection_and_edits(tmp_path):
-    import customtkinter as ctk
+def test_latest_preview_wins_after_fast_selection_and_edits(tmp_path, tk_root):
     from PIL import Image
     from src.editor.window import EditorWindow
 
@@ -79,8 +75,7 @@ def test_latest_preview_wins_after_fast_selection_and_edits(tmp_path):
     second = tmp_path / "b.jpg"
     Image.new("RGB", (800, 600), "red").save(first)
     Image.new("RGB", (800, 600), "blue").save(second)
-    root = ctk.CTk()
-    root.withdraw()
+    root = tk_root
     editor = EditorWindow(root)
     try:
         root.update()
@@ -100,4 +95,3 @@ def test_latest_preview_wins_after_fast_selection_and_edits(tmp_path):
         assert editor._tiles[b.id][0].winfo_exists()
     finally:
         editor.destroy()
-        root.destroy()

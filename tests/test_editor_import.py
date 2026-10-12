@@ -7,8 +7,7 @@ import pytest
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Tk GUI tested on Windows CI")
 
 
-def test_bulk_jpg_and_mpo_import_keeps_all_stills_and_reports_progress(tmp_path, monkeypatch):
-    import customtkinter as ctk
+def test_bulk_jpg_and_mpo_import_keeps_all_stills_and_reports_progress(tmp_path, monkeypatch, tk_root):
     from PIL import Image
     from src.editor.window import EditorWindow
 
@@ -27,8 +26,7 @@ def test_bulk_jpg_and_mpo_import_keeps_all_stills_and_reports_progress(tmp_path,
     paths.append(str(broken))
     notices = []
     monkeypatch.setattr("src.editor.window.messagebox.showwarning", lambda *args, **kwargs: notices.append(args))
-    root = ctk.CTk()
-    root.withdraw()
+    root = tk_root
     editor = EditorWindow(root)
     try:
         root.update()
@@ -49,11 +47,9 @@ def test_bulk_jpg_and_mpo_import_keeps_all_stills_and_reports_progress(tmp_path,
         assert not editor.import_dialog
     finally:
         editor.destroy()
-        root.destroy()
 
 
-def test_import_progress_can_stop_between_files(tmp_path, monkeypatch):
-    import customtkinter as ctk
+def test_import_progress_can_stop_between_files(tmp_path, monkeypatch, tk_root):
     from PIL import Image
     from src.editor.window import EditorWindow
 
@@ -69,8 +65,7 @@ def test_import_progress_can_stop_between_files(tmp_path, monkeypatch):
         return range(1)
 
     monkeypatch.setattr("src.editor.window.still_photo_frames", wait_for_validation)
-    root = ctk.CTk()
-    root.withdraw()
+    root = tk_root
     editor = EditorWindow(root)
     try:
         root.update()
@@ -89,4 +84,3 @@ def test_import_progress_can_stop_between_files(tmp_path, monkeypatch):
     finally:
         release.set()
         editor.destroy()
-        root.destroy()

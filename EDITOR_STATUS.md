@@ -1,4 +1,4 @@
-# Still-photo editor 0.2.0-alpha.1 (incomplete, unsigned alpha)
+# Still-photo editor 0.2.0-alpha.2 (incomplete, unsigned alpha)
 
 Launch the existing app (`python src/app.py`), then choose **Still Photo Editor**. This is a separate, in-progress workflow; the existing converter's quality slider and acceptance gate do not govern the editor.
 

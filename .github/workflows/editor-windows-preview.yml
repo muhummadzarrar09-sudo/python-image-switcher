@@ -45,12 +45,17 @@ jobs:
             Write-Host "::error file=installer.iss,line=1::$($_.Exception.Message)"
             exit 1
           }
-          $setup = Resolve-Path '.\dist\ImageSwitcher-Setup-0.2.0-alpha.1.exe'
+          $setup = Resolve-Path '.\dist\ImageSwitcher-Setup-0.2.0-alpha.2.exe'
           $process = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/NORESTART', '/SUPPRESSMSGBOXES') -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Setup failed: $($process.ExitCode)" }
           $directory = Join-Path $env:LOCALAPPDATA 'Programs\Image Switcher'
           $editor = Join-Path $directory 'ImageSwitcherEditor.exe'
           if (-not (Test-Path $editor)) { throw "Installed editor not found: $editor" }
+          # Exercise the actual updater's existing-installation branch; it must
+          # update in place rather than launching another first-install wizard.
+          & .\update-alpha.ps1
+          if ($LASTEXITCODE -ne 0) { throw "In-place updater failed: $LASTEXITCODE" }
+          if (-not (Test-Path $editor)) { throw "Updated editor moved or disappeared: $editor" }
           $process = Start-Process -FilePath $editor -ArgumentList '--editor-self-test' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installed editor smoke test failed: $($process.ExitCode)" }
           $uninstaller = Join-Path $directory 'unins000.exe'
@@ -60,6 +65,6 @@ jobs:
           if (Test-Path $editor) { throw "Installed editor remained after uninstall: $editor" }
       - uses: actions/upload-artifact@v4
         with:
-          name: image-switcher-alpha-0.2.0-alpha.1-unsigned
-          path: dist/ImageSwitcher-Setup-0.2.0-alpha.1.exe
+          name: image-switcher-alpha-0.2.0-alpha.2-unsigned
+          path: dist/ImageSwitcher-Setup-0.2.0-alpha.2.exe
           if-no-files-found: error

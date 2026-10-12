@@ -2,12 +2,13 @@
 ; Build first: python build_editor.py
 ; Then compile with Inno Setup 6: iscc installer.iss
 #define MyAppName "Image Switcher"
-#define MyAppVersion "0.2.0-alpha.1"
+#define MyAppVersion "0.2.0-alpha.2"
 #define MyAppPublisher "Image Switcher Team"
 #define MyAppURL "https://github.com/muhummadzarrar09-sudo/python-image-switcher"
 #define MyAppExeName "ImageSwitcherEditor.exe"
 
 [Setup]
+; Stable AppId: Inno Setup updates the existing installation rather than creating a second app.
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}

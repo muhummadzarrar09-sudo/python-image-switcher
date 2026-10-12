@@ -1,4 +1,4 @@
-# Still-photo editor alpha 0.2.0-alpha.1
+# Still-photo editor alpha 0.2.0-alpha.2
 
 This is an **unsigned, incomplete alpha**, not a production release. See [EDITOR_STATUS.md](EDITOR_STATUS.md) for supported features and blocked fidelity/ownership workflows. The editor installer packages the standalone editor, not the older converter.
 
@@ -10,7 +10,7 @@ Open PowerShell in the checkout directory after switching to the alpha branch:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\update-alpha.ps1
 ```
 
-The script locates Python 3.11 or uses Windows Package Manager (`winget`) to install it for the current user; creates/updates the ignored `.venv`, installs `requirements-editor.txt` and pytest; runs tests and a headless project round-trip; builds a windowed executable and tests it; installs Inno Setup 6 if needed via `winget`; compiles the unsigned alpha setup; then starts the setup interactively. It stops on failures and does **not** silently rewrite photos, delete an existing environment, or switch your Git branch. It needs network access for missing tools/dependencies, and a Windows 11 desktop for the interactive setup/UI. If a newly installed tool is not discoverable immediately, reopen PowerShell and rerun it.
+The script finds/installs Python 3.11 when missing, creates/updates the ignored `.venv`, verifies dependencies and tests, builds the windowed executable, locates/installs Inno Setup 6 and compiles the unsigned alpha setup. **If the editor is already installed, close it first:** the script detects the existing executable, performs a quiet **in-place update** using the stable Inno AppId and previous installation path, then smoke-tests the updated executable. It does not create a second app or remove your photos, exports or sessions. Only a first-time setup launches the interactive wizard. The updater stops on failures and never switches your Git branch. Missing dependencies/tools require network access; the alpha is unsigned.
 
 To install dependencies and run tests **without building or installing** the desktop app:
 
@@ -27,10 +27,10 @@ py -3.11 scripts/update_alpha.py
 .\.venv\Scripts\python.exe build_editor.py
 .\dist\ImageSwitcherEditor\ImageSwitcherEditor.exe --editor-self-test
 & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer.iss
-.\dist\ImageSwitcher-Setup-0.2.0-alpha.1.exe
+.\dist\ImageSwitcher-Setup-0.2.0-alpha.2.exe
 ```
 
-The installer can be unsigned and show an unknown-publisher warning; proceed only if you trust this checkout. The Windows workflow builds the installer, silently installs it on its disposable runner, smoke-tests the installed executable and uninstalls it. That is **not** proof of GUI functionality, camera compatibility, or clean Windows 11 installation. The app cannot be remotely installed on your personal PC from this sandbox.
+The setup is unsigned and can show an unknown-publisher warning; proceed only if you trust this checkout. The Windows workflow builds the setup, installs it on its disposable runner, runs the updater against that existing install, smoke-tests the updated executable and uninstalls it. That is **not** proof of GUI functionality, camera compatibility, or clean Windows 11 installation. The app cannot be remotely installed on your personal PC from this sandbox.
 
 ## Legacy converter (separate)
 

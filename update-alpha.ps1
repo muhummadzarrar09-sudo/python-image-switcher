@@ -1,7 +1,7 @@
 # Windows 11 alpha updater. Run from a PowerShell terminal in the checkout:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\update-alpha.ps1
-# Creates .venv, installs Python dependencies, tests, builds and launches
-# the unsigned alpha installer. It never rewrites source photos or Git branches.
+# Creates .venv, verifies dependencies, builds the alpha and updates an existing
+# installation in place (or launches first-time setup). Never rewrites photos or Git branches.
 param([switch]$DependenciesOnly, [switch]$ProbeTest)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -78,6 +78,28 @@ function Find-InnoCompiler {
     return $null
 }
 
+function Find-InstalledEditor {
+    # Prefer the user's existing installation. The Inno AppId below must stay
+    # stable; its uninstall registration also supports a custom install path.
+    $folders = @()
+    if ($env:LOCALAPPDATA) { $folders += (Join-Path $env:LOCALAPPDATA 'Programs\Image Switcher') }
+    $appId = '{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}_is1'
+    $roots = @(
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
+    )
+    foreach ($rootKey in $roots) {
+        $entry = Get-ItemProperty -Path (Join-Path $rootKey $appId) -ErrorAction SilentlyContinue
+        if ($entry -and $entry.InstallLocation) { $folders += $entry.InstallLocation }
+    }
+    foreach ($folder in $folders) {
+        $candidate = Join-Path $folder 'ImageSwitcherEditor.exe'
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    }
+    return $null
+}
+
 if ($ProbeTest) {
     # CI regression: a launcher writing to stderr and exiting nonzero must be
     # treated as unavailable, not terminate the updater's version search.
@@ -100,6 +122,13 @@ if ($ProbeTest) {
                 Set-Content -LiteralPath $probeCompiler -Value 'probe file'
                 if ((Find-InnoCompiler) -ne $probeCompiler) {
                     throw 'Per-user Inno Setup compiler was not discovered'
+                }
+                $installedFolder = Join-Path $probeRoot 'Programs\Image Switcher'
+                New-Item -ItemType Directory -Path $installedFolder -Force | Out-Null
+                $installedEditor = Join-Path $installedFolder 'ImageSwitcherEditor.exe'
+                Set-Content -LiteralPath $installedEditor -Value 'probe file'
+                if ((Find-InstalledEditor) -ne $installedEditor) {
+                    throw 'Existing per-user editor installation was not discovered'
                 }
             } finally {
                 $env:LOCALAPPDATA = $oldLocalAppData
@@ -147,8 +176,18 @@ try {
     $pythonPrefix = @($python | Select-Object -Skip 1)
     Invoke-Checked $pythonExe ($pythonPrefix + @('scripts/update_alpha.py'))
     if ($DependenciesOnly) {
-        Write-Host 'Dependencies and tests are ready. Skipped packaging and desktop installation (-DependenciesOnly).'
+        Write-Host 'Dependencies and tests are ready. Skipped packaging and desktop setup (-DependenciesOnly).'
         return
+    }
+
+    $installedBefore = Find-InstalledEditor
+    if ($installedBefore) {
+        if (Get-Process -Name 'ImageSwitcherEditor' -ErrorAction SilentlyContinue) {
+            throw 'Close Image Switcher Editor before updating it, then run this script again. Your projects are not affected.'
+        }
+        Write-Host "Existing editor found at $installedBefore. Preparing an in-place UPDATE..."
+    } else {
+        Write-Host 'No existing editor installation found. Preparing first-time setup...'
     }
 
     $venvPython = Join-Path $root '.venv\Scripts\python.exe'
@@ -167,12 +206,28 @@ try {
         if (-not $compiler) { throw 'Inno Setup installed, but ISCC.exe could not be located in per-user/system program folders or uninstall registration. Locate ISCC.exe and share its full path; do not reinstall Inno repeatedly.' }
     }
     Invoke-Checked $compiler @('installer.iss')
-    $setup = Join-Path $root 'dist\ImageSwitcher-Setup-0.2.0-alpha.1.exe'
-    if (-not (Test-Path $setup)) { throw "Alpha installer was not produced: $setup" }
-    Write-Warning 'The alpha installer is UNSIGNED and not validated on a clean Windows 11 machine. Continue only if you trust this checkout.'
-    $process = Start-Process -FilePath $setup -Wait -PassThru
-    if ($process.ExitCode -ne 0) { throw "Installer exited with status $($process.ExitCode)" }
-    Write-Host 'Alpha installer completed. Open Image Switcher from the Start menu.'
+    $setup = Join-Path $root 'dist\ImageSwitcher-Setup-0.2.0-alpha.2.exe'
+    if (-not (Test-Path $setup)) { throw "Alpha setup was not produced: $setup" }
+    if ($installedBefore) {
+        # The stable Inno AppId reuses the prior directory/uninstaller. /SILENT
+        # shows progress but avoids a second first-install wizard.
+        Write-Host 'Updating your existing Image Switcher Alpha in place...'
+        $process = Start-Process -FilePath $setup -ArgumentList @('/SILENT', '/NORESTART', '/SUPPRESSMSGBOXES') -Wait -PassThru
+        if ($process.ExitCode -ne 0) { throw "Update failed with status $($process.ExitCode)" }
+        $installedAfter = Find-InstalledEditor
+        if (-not $installedAfter -or $installedAfter -ne $installedBefore) {
+            throw 'Update finished but the existing installation could not be verified at its previous path.'
+        }
+        $smoke = Start-Process -FilePath $installedAfter -ArgumentList '--editor-self-test' -Wait -PassThru
+        if ($smoke.ExitCode -ne 0) { throw "Updated editor verification failed: $($smoke.ExitCode)" }
+        Write-Host "UPDATED in place to 0.2.0-alpha.2: $installedAfter"
+        Write-Host 'Your originals, exported projects and .isbatch sessions were not touched.'
+    } else {
+        Write-Warning 'The alpha setup is UNSIGNED and not validated on a clean Windows 11 machine. Continue only if you trust this checkout.'
+        $process = Start-Process -FilePath $setup -Wait -PassThru
+        if ($process.ExitCode -ne 0) { throw "First-time setup exited with status $($process.ExitCode)" }
+        Write-Host 'First-time setup completed. Open Image Switcher from the Start menu.'
+    }
 } finally {
     Pop-Location
 }

@@ -1,4 +1,4 @@
-# Still-photo editor: implementation status (preview, not a finished release)
+# Still-photo editor 0.2.0-alpha.1 (incomplete, unsigned alpha)
 
 Launch the existing app (`python src/app.py`), then choose **Still Photo Editor**. This is a separate, in-progress workflow; the existing converter's quality slider and acceptance gate do not govern the editor.
 
@@ -16,7 +16,7 @@ Launch the existing app (`python src/app.py`), then choose **Still Photo Editor*
 - NEF background masks/replacements are blocked instead of silently demoting a 16-bit render to 8 bits. Large images over the 100-million-pixel safety ceiling are blocked; memory and performance still need larger-camera testing. Color controls operate on encoded RGB channel values, not in a fully managed linear-light workflow. No local retouch/automatic subject segmentation yet.
 - Rights strings are *declared fields in `.isphoto` only*: standard PNG/TIFF exports do not yet carry comprehensive IPTC/XMP copyright, attribution or C2PA. No embedded robust watermark, independently trusted signer, revocation flow, remote recovery, or credential interoperability matrix is implemented. A screenshot can lack original image provenance and can never restore lost information. Do not use the preview to claim ownership verification.
 - `.isphoto` is a container, not a new standard image codec. Other apps need the companion PNG/TIFF. Archive checksums do not sign the wrapper, and a signature on an inner image would not automatically sign the wrapper.
-- No clean Windows 11 VM installation/UI validation or signed production installer has been performed. `installer.iss` and the GitHub Actions job generate **unsigned development previews only** (CI uses a Windows runner, not a clean Windows 11 PC); their existence is not a release gate pass. Do not distribute them as a finished editor.
+- No clean Windows 11 VM installation/UI validation or signed production installer has been performed. `installer.iss` and the GitHub Actions job generate **unsigned alpha installers** (CI uses a Windows runner, not a clean Windows 11 PC); their existence is not a production release gate pass. The alpha is for testing, not trusted ownership/provenance workflows.
 
 ## Try and test
 
@@ -27,4 +27,4 @@ python src/app.py --editor-self-test  # headless round-trip for packaged executa
 python src/app.py                     # opens the desktop app, requires a GUI
 ```
 
-Build a *development preview* on Windows with `python -m pip install -r requirements-editor.txt` and `python build_editor.py --console`, run `dist\ImageSwitcherEditor\ImageSwitcherEditor.exe --editor-self-test`, then compile `installer.iss` with Inno Setup 6. For the existing converter executable, use the separate legacy `build_exe.py`. The preview installer still requires manual installation, editing/export, uninstall and clean Windows 11 verification, including Nikon camera fixtures and credential tests, before a real release.
+For Windows 11 alpha update/build/interactive setup, run `powershell -NoProfile -ExecutionPolicy Bypass -File .\update-alpha.ps1` from the checkout. `-DependenciesOnly` runs Python install/tests without packaging or desktop setup. See [BUILD.md](BUILD.md) for prerequisites, manual alternatives and limitations. For the existing converter executable, use the separate legacy `build_exe.py`. The alpha still requires editing/export, uninstall and clean Windows 11 verification with real Nikon camera fixtures; ownership credentials are not ready.

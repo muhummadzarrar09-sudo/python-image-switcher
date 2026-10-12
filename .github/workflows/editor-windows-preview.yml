@@ -1,4 +1,4 @@
-name: Windows editor preview (not a release)
+name: Windows still-photo editor alpha
 on:
   workflow_dispatch:
   push:
@@ -6,21 +6,20 @@ on:
       - arena/a3458c15-python-image-switcher
 
 jobs:
-  windows-preview:
+  windows-alpha:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install dependencies
-        run: python -m pip install -r requirements-editor.txt pytest
-      - name: Test editor
-        run: python -m pytest -q tests/test_editor_render.py tests/test_photo_project.py
-      - name: Build preview executable
+      - name: Install alpha dependencies and verify via updater
+        shell: powershell
+        run: .\update-alpha.ps1 -DependenciesOnly
+      - name: Build windowed alpha executable
         run: |
-          python build_editor.py --console 2>&1 | Tee-Object -FilePath build-output.txt
+          .\.venv\Scripts\python.exe build_editor.py 2>&1 | Tee-Object -FilePath build-output.txt
           if ($LASTEXITCODE -ne 0) {
             $tail = (Get-Content build-output.txt -Tail 28) -join '%0A'
             Write-Host "::error file=build_editor.py,line=1::$tail"
@@ -28,12 +27,12 @@ jobs:
           }
       - name: Smoke-test packaged editor without UI
         run: .\dist\ImageSwitcherEditor\ImageSwitcherEditor.exe --editor-self-test
-      - name: Install Inno Setup
+      - name: Install Inno Setup on runner
         run: choco install innosetup --no-progress -y
-      - name: Build preview installer
+      - name: Build unsigned alpha installer
         run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer.iss'
       - uses: actions/upload-artifact@v4
         with:
-          name: image-switcher-windows-preview-unsigned
-          path: dist/ImageSwitcher-Setup-0.2.0-preview.exe
+          name: image-switcher-alpha-0.2.0-alpha.1-unsigned
+          path: dist/ImageSwitcher-Setup-0.2.0-alpha.1.exe
           if-no-files-found: error

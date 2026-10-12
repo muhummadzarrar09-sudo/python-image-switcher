@@ -17,12 +17,13 @@ from PIL import Image, ImageTk
 from .batch import BatchSession, EDIT_FIELDS
 from .render import PhotoRenderError, STILL_EXTENSIONS, render, source_info
 from .workflow import export_batch, import_project
+from .version import ALPHA_VERSION
 
 
 class EditorWindow(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)
-        self.title("Image Switcher | Still Photo Editor (work in progress)")
+        self.title(f"Image Switcher | Still Photo Editor {ALPHA_VERSION}")
         self.geometry("1240x840")
         self.minsize(1000, 700)
         self.batch = BatchSession()

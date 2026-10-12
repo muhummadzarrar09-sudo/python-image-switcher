@@ -123,7 +123,11 @@ def test_export_escape_closes_without_writing(tmp_path, tk_root):
         dialog = ExportOptions(editor)
         tk_root.update()
         dialog.folder.set(str(tmp_path / "output"))
-        dialog.creator.event_generate("<Escape>")
+        dialog.creator.focus_set()
+        tk_root.update()
+        # CTkEntry is a composite frame; real keystrokes target its inner
+        # tkinter Entry, not the wrapper CTk widget.
+        dialog.creator._entry.event_generate("<Escape>", when="tail")
         tk_root.update()
         assert not dialog.winfo_exists()
         assert not (tmp_path / "output").exists()

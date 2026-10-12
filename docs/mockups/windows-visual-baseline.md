@@ -10,13 +10,13 @@ First measure a real 1456 × 766 client area at 100% Windows scaling. If the use
 
 ## Capture on the user's Windows 11 machine
 
-Close the installed editor so the screenshots come from one build. From this branch's checkout after running `update-alpha.ps1 -DependenciesOnly`:
+Close the installed editor so the screenshots come from one build. From this branch's checkout after running `update-alpha.ps1 -DependenciesOnly`, run the default **AI-generated, non-branded test fixture** without providing your own photo:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\capture_editor_baseline.py --photo "C:\path\to\a\real\photo.jpg" --window 1456x766
+.\.venv\Scripts\python.exe scripts\capture_editor_baseline.py --window 1456x766
 ```
 
-You may pass a second `--photo` for another real still photo (prefer a JPG and a Nikon NEF; NEF preview can take time, so increase `--wait-ms 1800` if needed). With one photo the script loads it **twice as separate numbered entries**, then hand-edits #0001 to exercise the protected state. It does not modify or export the original. Keep sensitive source photos private. It writes ignored files under `ui-captures/windows-11/`: `empty-editor.png`, `populated-editor.png`, `protected-batch.png`, `crop-tools.png`, `background-tools.png`, `export-overlay.png`, popup crops, and `capture.json` with OS/DPI/Tk scaling, window and component bounds, and source **filenames only**. Examine the captures before sharing: visible filenames or a photo may reveal personal information. Do not commit captures or NEF fixtures; share an approved/sanitized reference package through a private channel.
+The fixture (`tests/fixtures/ui-camera.jpg`, 1536 × 1024, ~156 KB) was made for visual *development/testing*, not for product advertising or an approved real-photo baseline. It lets us develop without your private images; `capture.json` marks these screenshots `fixture_only: true`. If/when a real photo becomes available, optionally pass `--photo "C:\path\to\a\real\photo.jpg"` (repeat for another still; preferably JPG and Nikon NEF, increasing `--wait-ms 1800` for a slow NEF). With one photo the script loads it **twice as separate numbered entries**, then hand-edits #0001 to exercise the protected state. It does not modify or export the original. Keep sensitive source photos private. It writes ignored files under `ui-captures/windows-11/`: `empty-editor.png`, `populated-editor.png`, `protected-batch.png`, `crop-tools.png`, `background-tools.png`, `export-overlay.png`, popup crops, and `capture.json` with OS/DPI/Tk scaling, window and component bounds, and source **filenames only**. Examine the captures before sharing: visible filenames or a photo may reveal personal information. Do not commit captures or NEF fixtures; share an approved/sanitized reference package through a private channel.
 
 Record Windows **display scaling**, text size, resolution, theme and whether the app was maximized, and identify an approved photo fixture. Save a second set using the export popup *after* a batch is populated. The baseline script captures actual Tk windows; the illustrated camera or mockup text is never injected into the app.
 

@@ -1,7 +1,8 @@
 """Capture reproducible *actual Windows* editor states for MUH-45.
 
-Run with a real photo on the same Windows 11 machine used for visual review.
-Images and source paths are private and are never added to Git automatically.
+By default this uses an AI-generated camera test image, NOT a signed-off real
+photo baseline. Pass --photo later to test local photos; generated screenshots
+and source paths are private and are never added to Git automatically.
 """
 from __future__ import annotations
 
@@ -72,6 +73,8 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
         "tk_pixels_per_point": float(root.tk.call("tk", "scaling")),
         "ctk_window_scaling": float(editor._get_window_scaling()),
         "source_names": [p.name for p in photos],  # never store full private source paths
+        "fixture_only": all(p.resolve() == (Path(__file__).resolve().parents[1] / "tests/fixtures/ui-camera.jpg")
+                            for p in photos),
         "states": {},
         "notes": "Real OS capture; fixture/photo and approval must be recorded separately. "
                  "No source pixels or AI-generated mockup are treated as ground truth.",
@@ -177,8 +180,9 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--photo", type=Path, required=True, action="append",
-                        help="Real local JPG, NEF or other supported still photo (repeat for second image)")
+    parser.add_argument("--photo", type=Path, action="append",
+                        help="Optional real local photo (repeat for a second image). If omitted, "
+                             "uses the labeled AI-generated camera test fixture, NOT a sign-off baseline.")
     parser.add_argument("--output", type=Path, default=Path("ui-captures") / "windows-11",
                         help="Ignored local directory for screenshots and measurement JSON")
     parser.add_argument("--window", type=window_size, default=(1456, 766),
@@ -188,7 +192,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.wait_ms < 300:
         parser.error("--wait-ms must be at least 300")
-    run(args.photo, args.output, args.window, args.wait_ms)
+    photos = args.photo or [Path(__file__).resolve().parents[1] / "tests/fixtures/ui-camera.jpg"]
+    run(photos, args.output, args.window, args.wait_ms)
 
 
 if __name__ == "__main__":

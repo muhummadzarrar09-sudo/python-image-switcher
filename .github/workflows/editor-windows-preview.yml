@@ -22,13 +22,11 @@ jobs:
         run: .\update-alpha.ps1 -DependenciesOnly
       - name: Smoke-test real desktop controls and export dialog
         run: .\.venv\Scripts\python.exe -m pytest -q tests/test_editor_window.py tests/test_capture_editor_baseline.py
-      - name: Capture Windows UI smoke states (synthetic fixture, not approved baselines)
+      - name: Capture Windows UI smoke states (AI test fixture, not approved baselines)
         shell: pwsh
         run: |
-          & .\.venv\Scripts\python.exe -c "from pathlib import Path; from PIL import Image; p=Path('temp/ui-fixture.png'); p.parent.mkdir(exist_ok=True); Image.new('RGB', (800, 500), (88, 104, 128)).save(p)"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force ui-captures\runner | Out-Null
-          & .\.venv\Scripts\python.exe scripts\capture_editor_baseline.py --photo temp\ui-fixture.png --output ui-captures\runner --wait-ms 500 *> ui-captures\runner\capture.log
+          & .\.venv\Scripts\python.exe scripts\capture_editor_baseline.py --output ui-captures\runner --wait-ms 500 *> ui-captures\runner\capture.log
           if ($LASTEXITCODE -ne 0) {
             $tail = (Get-Content ui-captures\runner\capture.log -Tail 28) -join '%0A'
             Write-Host "::error file=scripts/capture_editor_baseline.py,line=1::$tail"

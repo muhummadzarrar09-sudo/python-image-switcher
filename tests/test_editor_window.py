@@ -22,6 +22,13 @@ def test_named_adjustment_sliders_and_export_dialog_do_not_write_early(tmp_path)
     try:
         editor = EditorWindow(root)
         root.update()
+        # Concept-derived layout: one working action row, then three adjacent
+        # surfaces, not a second toolbar consuming canvas height.
+        assert editor.header.winfo_height() <= 55
+        assert editor.sidebar.winfo_rooty() == editor.workspace.winfo_rooty()
+        assert editor.workspace.winfo_rooty() == editor.panel.winfo_rooty()
+        assert editor.sidebar.winfo_width() <= 185
+        assert editor.panel.winfo_rootx() > editor.canvas.winfo_rootx()
         assert set(editor.sliders) == set(EDIT_FIELDS)
         assert "sharpness" in editor.sliders and "sharpening" not in editor.sliders
         assert set(editor.value_labels) == set(EDIT_FIELDS)

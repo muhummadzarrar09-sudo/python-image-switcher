@@ -24,7 +24,7 @@ class EditorWindow(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)
         self.title(f"Image Switcher | Still Photo Editor {ALPHA_VERSION}")
-        self.geometry("1240x840")
+        self.geometry("1456x766")
         self.minsize(1000, 700)
         self.batch = BatchSession()
         self.session_path: str | None = None
@@ -45,37 +45,41 @@ class EditorWindow(ctk.CTkToplevel):
         self.scope = ctk.StringVar(value="Batch")
         self.configure(fg_color="#16181c")
         self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(2, weight=1)
+        self.grid_rowconfigure(1, weight=1)
 
-        # The selected export concept is the visual reference: compact dark
-        # chrome, a thumbnail rail, large photo surface, and direct adjustments.
-        header = self.header = ctk.CTkFrame(self, height=56, fg_color="#1a1c21", corner_radius=0)
+        # Single compact chrome row; every action here is a working command.
+        # Keep its width bounded at the 1000px minimum instead of placing a
+        # second full-width toolbar between the photo and the title.
+        header = self.header = self.toolbar = ctk.CTkFrame(
+            self, height=48, fg_color="#1c1e22", corner_radius=0)
         header.grid(row=0, column=0, columnspan=3, sticky="ew")
         header.grid_propagate(False)
-        ctk.CTkLabel(header, text="IS", width=33, height=33, fg_color="#173a68",
-                     corner_radius=7, font=ctk.CTkFont(size=16, weight="bold")).pack(side="left", padx=(13, 9), pady=10)
-        ctk.CTkLabel(header, text="Image Switcher Alpha",
-                     font=ctk.CTkFont(size=17, weight="bold")).pack(side="left")
-        ctk.CTkButton(header, text="Export", width=110, height=34, fg_color="#19539a",
-                      hover_color="#2568ba", command=self.export).pack(side="right", padx=14)
+        ctk.CTkLabel(header, text="IS", width=29, height=29, fg_color="#19539a",
+                     corner_radius=5, font=ctk.CTkFont(size=14, weight="bold")).pack(
+                         side="left", padx=(10, 7), pady=8)
+        ctk.CTkLabel(header, text="Image Switcher", text_color="#f3f5f9",
+                     font=ctk.CTkFont(size=15, weight="bold")).pack(side="left", padx=(0, 8))
+        for text, width, action in (("Add", 56, self.add_files), ("Open", 56, self.open_session),
+                                    ("Save", 56, self.save_session), ("Project", 67, self.open_project),
+                                    ("Crop", 56, self.open_crop_tools),
+                                    ("Background", 91, self.open_background_tools)):
+            ctk.CTkButton(header, text=text, command=action, height=30, width=width,
+                          fg_color="#30343a", hover_color="#424b56", corner_radius=5,
+                          font=ctk.CTkFont(size=11)).pack(side="left", padx=2, pady=8)
+        ctk.CTkButton(header, text="Export", width=104, height=32, fg_color="#2468b9",
+                      hover_color="#337dd2", command=self.export).pack(side="right", padx=(3, 10))
+        ctk.CTkSegmentedButton(header, variable=self.scope, values=["Selected", "Batch"],
+                               width=130, height=30, selected_color="#205da7",
+                               selected_hover_color="#286cbe", command=lambda _: self.sync_sliders()).pack(
+                                   side="right", padx=(2, 6))
+        ctk.CTkLabel(header, text="Scope", text_color="#abb3bd",
+                     font=ctk.CTkFont(size=11)).pack(side="right", padx=3)
+        ctk.CTkButton(header, text="Unlock", command=self.unlock, width=64, height=30,
+                      fg_color="#30343a", hover_color="#424b56",
+                      font=ctk.CTkFont(size=11)).pack(side="right", padx=3)
 
-        toolbar = self.toolbar = ctk.CTkFrame(self, height=51, fg_color="#202329", corner_radius=0)
-        toolbar.grid(row=1, column=0, columnspan=3, sticky="ew")
-        toolbar.grid_propagate(False)
-        for text, action in (("+  Add photos", self.add_files), ("Open batch", self.open_session),
-                             ("Save batch", self.save_session), ("Open project", self.open_project),
-                             ("Crop / rotate", self.open_crop_tools), ("Background / mask", self.open_background_tools)):
-            ctk.CTkButton(toolbar, text=text, command=action, height=32, width=96,
-                          fg_color="#32363e", hover_color="#414955", corner_radius=6).pack(side="left", padx=3, pady=8)
-        ctk.CTkSegmentedButton(toolbar, variable=self.scope, values=["Selected", "Batch"],
-                               width=153, height=32, selected_color="#205da7",
-                               selected_hover_color="#286cbe", command=lambda _: self.sync_sliders()).pack(side="right", padx=(3, 14))
-        ctk.CTkLabel(toolbar, text="Scope", text_color="#aab0b9").pack(side="right", padx=7)
-        ctk.CTkButton(toolbar, text="Unlock", command=self.unlock, width=70, height=32,
-                      fg_color="#32363e", hover_color="#414955").pack(side="right", padx=3)
-
-        sidebar = self.sidebar = ctk.CTkFrame(self, width=188, fg_color="#21252b", corner_radius=0)
-        sidebar.grid(row=2, column=0, sticky="nsew", padx=(7, 3), pady=(5, 7))
+        sidebar = self.sidebar = ctk.CTkFrame(self, width=164, fg_color="#1f2227", corner_radius=0)
+        sidebar.grid(row=1, column=0, sticky="nsew")
         sidebar.grid_propagate(False)
         rail_top = ctk.CTkFrame(sidebar, fg_color="transparent")
         rail_top.pack(fill="x", padx=10, pady=(12, 6))
@@ -84,13 +88,13 @@ class EditorWindow(ctk.CTkToplevel):
         self.batch_count = ctk.CTkLabel(rail_top, text="0", width=27, height=23,
                                         corner_radius=7, fg_color="#343a43")
         self.batch_count.pack(side="right")
-        self.items = ctk.CTkScrollableFrame(sidebar, width=164, fg_color="transparent")
-        self.items.pack(fill="both", expand=True, padx=5, pady=2)
-        ctk.CTkLabel(sidebar, text="🔒 Protected edits stay in the batch",
-                     text_color="#aab0b9", wraplength=175, font=ctk.CTkFont(size=10)).pack(pady=8)
+        self.items = ctk.CTkScrollableFrame(sidebar, width=138, fg_color="transparent")
+        self.items.pack(fill="both", expand=True, padx=3, pady=2)
+        ctk.CTkLabel(sidebar, text="Protected edits stay in batch",
+                     text_color="#aab0b9", wraplength=155, font=ctk.CTkFont(size=10)).pack(pady=7)
 
         workspace = self.workspace = ctk.CTkFrame(self, fg_color="#17191d", corner_radius=0)
-        workspace.grid(row=2, column=1, sticky="nsew", padx=(0, 3), pady=(5, 7))
+        workspace.grid(row=1, column=1, sticky="nsew")
         workspace.grid_rowconfigure(0, weight=1)
         workspace.grid_columnconfigure(0, weight=1)
         self.canvas = tk.Canvas(workspace, bg="#17191d", highlightthickness=0)
@@ -108,25 +112,25 @@ class EditorWindow(ctk.CTkToplevel):
                                width=138, height=30, selected_color="#205da7",
                                command=lambda _: self.show_current()).pack(side="right", padx=5, pady=8)
 
-        panel = self.panel = ctk.CTkScrollableFrame(self, width=267, fg_color="#272c33", corner_radius=0)
-        panel.grid(row=2, column=2, sticky="ns", padx=(3, 8), pady=(5, 7))
+        panel = self.panel = ctk.CTkScrollableFrame(self, width=295, fg_color="#21252b", corner_radius=0)
+        panel.grid(row=1, column=2, sticky="nsew")
         ctk.CTkLabel(panel, text="ADJUSTMENTS", anchor="w", text_color="#c9ced7",
-                     font=ctk.CTkFont(size=12, weight="bold")).pack(fill="x", padx=12, pady=(14, 17))
+                     font=ctk.CTkFont(size=11, weight="bold")).pack(fill="x", padx=12, pady=(12, 10))
         # Real capabilities only: do not create fake Whites/Clarity/Denoise
         # controls simply because the AI mockup drew them.
         for field, (low, high) in EDIT_FIELDS.items():
             row = ctk.CTkFrame(panel, fg_color="transparent")
-            row.pack(fill="x", padx=9, pady=(0, 10))
-            line = ctk.CTkFrame(row, fg_color="transparent")
-            line.pack(fill="x")
-            ctk.CTkLabel(line, text=field.replace("_", " ").title(), anchor="w",
-                         font=ctk.CTkFont(size=12)).pack(side="left")
-            label = ctk.CTkLabel(line, text="+0.00", anchor="e", width=48, text_color="#bbc1cc")
-            label.pack(side="right")
-            slider = ctk.CTkSlider(row, from_=low, to=high, number_of_steps=200, height=15,
-                                   button_length=15, progress_color="#2764a9", fg_color="#434850",
+            row.pack(fill="x", padx=8, pady=(0, 10))
+            row.grid_columnconfigure(1, weight=1)
+            ctk.CTkLabel(row, text=field.replace("_", " ").title(), anchor="w",
+                         width=80, font=ctk.CTkFont(size=11)).grid(row=0, column=0, sticky="w", padx=(0, 5))
+            slider = ctk.CTkSlider(row, from_=low, to=high, number_of_steps=200, width=120, height=14,
+                                   button_length=14, progress_color="#2764a9", fg_color="#434850",
                                    command=lambda value, key=field: self.change_value(key, value))
-            slider.pack(fill="x", pady=(5, 0))
+            slider.grid(row=0, column=1, sticky="ew")
+            label = ctk.CTkLabel(row, text="+0.00", anchor="e", width=45,
+                                 font=ctk.CTkFont(size=10), text_color="#bbc1cc")
+            label.grid(row=0, column=2, padx=(7, 0))
             self.sliders[field] = slider
             self.value_labels[field] = label
         self.sync_sliders()
@@ -160,20 +164,20 @@ class EditorWindow(ctk.CTkToplevel):
     def thumbnail(self, photo):
         """Cache a small original preview; never re-render full-resolution photos for the rail."""
         if photo.id not in self._thumbnail_cache:
-            background = Image.new("RGBA", (146, 82), "#343943")
+            background = Image.new("RGBA", (104, 61), "#343943")
             try:
                 image, _, _ = _open_source(photo.source, preview=True)
                 if not isinstance(image, Image.Image):
                     image = Image.fromarray((image / 257).astype("uint8"))
                 image = image.convert("RGBA")
-                image.thumbnail((146, 82), Image.Resampling.LANCZOS)
-                x, y = (146-image.width)//2, (82-image.height)//2
+                image.thumbnail((104, 61), Image.Resampling.LANCZOS)
+                x, y = (104-image.width)//2, (61-image.height)//2
                 background.alpha_composite(image, (x, y))
             except Exception:
                 pass  # missing source is still visibly numbered; export reports the error
             rgb = background.convert("RGB")
             self._thumbnail_cache[photo.id] = ctk.CTkImage(light_image=rgb, dark_image=rgb,
-                                                            size=(146, 82))
+                                                            size=(104, 61))
         return self._thumbnail_cache[photo.id]
 
     def refresh_list(self):
@@ -182,13 +186,24 @@ class EditorWindow(ctk.CTkToplevel):
         self.batch_count.configure(text=str(len(self.batch.photos)))
         for photo in self.batch.photos:
             selected = photo.number == self.current
-            marker = "🔒" if photo.protected else ""
-            ctk.CTkButton(self.items, text=f"#{photo.number:04d} {marker}  {Path(photo.source).stem[:10]}",
-                          image=self.thumbnail(photo), compound="top", width=157, height=119,
-                          border_width=2 if selected else 0, border_color="#5195e9",
-                          fg_color="#17385f" if selected else "#30353c",
-                          hover_color="#375273", corner_radius=7,
-                          command=lambda n=photo.number: self.select(n)).pack(fill="x", pady=4)
+            tile = ctk.CTkFrame(self.items, height=84, corner_radius=4,
+                                fg_color="#23446b" if selected else "#282c32")
+            tile.pack(fill="x", pady=3)
+            tile.pack_propagate(False)
+            ctk.CTkLabel(tile, text=str(photo.number), width=23, height=21,
+                         corner_radius=3, fg_color="#101317", text_color="#e0e5ed",
+                         font=ctk.CTkFont(size=10)).pack(side="left", padx=(2, 2))
+            thumbnail_column = ctk.CTkFrame(tile, fg_color="transparent")
+            thumbnail_column.pack(side="left", fill="y")
+            ctk.CTkButton(thumbnail_column, text="", image=self.thumbnail(photo),
+                          width=104, height=61, border_width=2 if selected else 0,
+                          border_color="#5195e9", fg_color="#30353c",
+                          hover_color="#375273", corner_radius=3,
+                          command=lambda n=photo.number: self.select(n)).pack()
+            ctk.CTkLabel(thumbnail_column,
+                         text=("LOCKED · " if photo.protected else "") + Path(photo.source).stem[:11],
+                         width=104, height=18, anchor="w", text_color="#8dc0ff" if photo.protected else "#abb3bd",
+                         font=ctk.CTkFont(size=9)).pack()
         if self.batch.photos:
             self.status.configure(text=f"{len(self.batch.photos)} photos · protected: {self.batch.excluded_numbers} · full batch includes all")
         else:

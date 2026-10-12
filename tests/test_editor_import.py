@@ -1,4 +1,6 @@
 """Windows-only integration: progress stays visible while camera JPGs import."""
+import os
+import shutil
 import sys
 import time
 
@@ -45,6 +47,41 @@ def test_bulk_jpg_and_mpo_import_keeps_all_stills_and_reports_progress(tmp_path,
         assert "13/14 file(s)" not in editor.status.cget("text")  # processed all, including failure
         assert "14/14 file(s)" in editor.status.cget("text")
         assert not editor.import_dialog
+    finally:
+        editor.destroy()
+
+
+def test_over_400_distinct_jpg_paths_keep_queue_and_rail_bounded(tmp_path, tk_root):
+    from PIL import Image
+    from src.editor.window import EditorWindow, RAIL_PAGE_SIZE
+
+    template = tmp_path / "template.jpg"
+    Image.new("RGB", (320, 240), (100, 80, 60)).save(template)
+    paths = []
+    for i in range(421):
+        target = tmp_path / f"batch-{i:04d}.jpg"
+        try:
+            os.link(template, target)  # distinct paths without 421 redundant test blobs
+        except OSError:
+            shutil.copyfile(template, target)
+        paths.append(str(target))
+    editor = EditorWindow(tk_root)
+    try:
+        tk_root.update()
+        editor.start_import(paths)
+        assert editor._import_queue.maxsize == 24
+        peak_pending = 0
+        deadline = time.monotonic() + 90
+        while editor.importing and time.monotonic() < deadline:
+            tk_root.update()
+            peak_pending = max(peak_pending, editor._import_queue.qsize())
+            time.sleep(.01)
+        assert not editor.importing
+        assert len(editor.batch.photos) == 421
+        assert [p.number for p in editor.batch.photos] == list(range(1, 422))
+        assert editor.current == 421 and editor._rail_page == 8
+        assert len(editor._tiles) == 37 and len(editor._tiles) <= RAIL_PAGE_SIZE
+        assert peak_pending <= 24
     finally:
         editor.destroy()
 

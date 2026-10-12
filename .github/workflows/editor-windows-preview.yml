@@ -88,11 +88,24 @@ jobs:
           if (-not (Test-Path $editor)) { throw "Updated editor moved or disappeared: $editor" }
           $process = Start-Process -FilePath $editor -ArgumentList '--editor-self-test' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installed editor smoke test failed: $($process.ExitCode)" }
+          $report = Join-Path (Resolve-Path 'ui-captures\runner').Path 'installed-gpu-report.json'
+          $process = Start-Process -FilePath $editor -ArgumentList @('--gpu-report', ('"{0}"' -f $report)) -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installed GPU/CPU-fallback diagnostic failed: $($process.ExitCode)" }
+          $diagnostic = Get-Content $report -Raw | ConvertFrom-Json
+          if (-not $diagnostic.packaged -or $diagnostic.max_channel_difference -gt 1) {
+            throw 'Packaged preview/fallback parity check failed'
+          }
           $uninstaller = Join-Path $directory 'unins000.exe'
           if (-not (Test-Path $uninstaller)) { throw "Uninstaller not found: $uninstaller" }
           $process = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT', '/NORESTART') -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Uninstall failed: $($process.ExitCode)" }
           if (Test-Path $editor) { throw "Installed editor remained after uninstall: $editor" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: installed-gpu-fallback-diagnostic
+          path: ui-captures/runner/installed-gpu-report.json
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: image-switcher-alpha-0.2.0-alpha.6-unsigned

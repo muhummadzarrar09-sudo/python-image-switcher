@@ -13,6 +13,13 @@ def main():
         from src.app import editor_self_test
         editor_self_test()
         return
+    if "--gpu-report" in sys.argv:
+        index = sys.argv.index("--gpu-report")
+        if index + 1 >= len(sys.argv):
+            raise SystemExit("--gpu-report requires a JSON output path")
+        from src.editor.diagnostics import installed_gpu_report
+        installed_gpu_report(sys.argv[index + 1])
+        return
     import customtkinter as ctk
     from src.editor.window import EditorWindow
     ctk.set_appearance_mode("dark")

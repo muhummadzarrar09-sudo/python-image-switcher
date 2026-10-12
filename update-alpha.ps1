@@ -2,7 +2,8 @@
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\update-alpha.ps1
 # Creates .venv, verifies dependencies, builds the alpha and updates an existing
 # installation in place (or launches first-time setup). Never rewrites photos or Git branches.
-param([switch]$DependenciesOnly, [switch]$ProbeTest)
+param([switch]$DependenciesOnly, [switch]$ProbeTest,
+      [switch]$GpuReport, [string]$ReportPath)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
@@ -98,6 +99,33 @@ function Find-InstalledEditor {
         if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
     }
     return $null
+}
+
+if ($GpuReport) {
+    # Resolve the installed app by its actual location (including custom Inno
+    # install paths), not a hardcoded LocalAppData guess. No build or install.
+    $installed = Find-InstalledEditor
+    if (-not $installed) {
+        $built = Join-Path $root 'dist\ImageSwitcherEditor\ImageSwitcherEditor.exe'
+        $hint = if (Test-Path -LiteralPath $built -PathType Leaf) {
+            "A packaged build exists at $built, but it is NOT an installed app."
+        } else { 'No local packaged build was found either.' }
+        throw "Installed Image Switcher Editor not found. $hint Run .\update-alpha.ps1 without -DependenciesOnly, finish the first-time installer wizard, and check its final output."
+    }
+    $destination = if ($ReportPath) {
+        $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ReportPath)
+    } else { Join-Path $root 'ui-captures\installed-gpu-report.json' }
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
+    Write-Host "Checking installed editor: $installed"
+    $process = Start-Process -FilePath $installed -ArgumentList @('--gpu-report', ('"{0}"' -f $destination)) -Wait -PassThru
+    if ($process.ExitCode -ne 0) { throw "Installed GPU diagnostic failed with exit code $($process.ExitCode)" }
+    if (-not (Test-Path -LiteralPath $destination -PathType Leaf)) {
+        throw "Installed editor exited successfully but did not write $destination"
+    }
+    Write-Host "Installed GPU diagnostic: $destination"
+    Get-Content -LiteralPath $destination
+    $global:LASTEXITCODE = 0
+    return
 }
 
 if ($ProbeTest) {
@@ -226,7 +254,13 @@ try {
         Write-Warning 'The alpha setup is UNSIGNED and not validated on a clean Windows 11 machine. Continue only if you trust this checkout.'
         $process = Start-Process -FilePath $setup -Wait -PassThru
         if ($process.ExitCode -ne 0) { throw "First-time setup exited with status $($process.ExitCode)" }
-        Write-Host 'First-time setup completed. Open Image Switcher from the Start menu.'
+        $installedAfter = Find-InstalledEditor
+        if (-not $installedAfter) {
+            throw 'Setup exited, but no installed ImageSwitcherEditor.exe was found. Check whether the installer wizard completed; the packaged build in dist is NOT the installed app.'
+        }
+        $smoke = Start-Process -FilePath $installedAfter -ArgumentList '--editor-self-test' -Wait -PassThru
+        if ($smoke.ExitCode -ne 0) { throw "Installed editor verification failed: $($smoke.ExitCode)" }
+        Write-Host "INSTALLED 0.2.0-alpha.7 at $installedAfter. Open Image Switcher from the Start menu."
     }
 } finally {
     Pop-Location

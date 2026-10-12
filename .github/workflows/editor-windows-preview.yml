@@ -94,8 +94,10 @@ jobs:
           $process = Start-Process -FilePath $editor -ArgumentList '--editor-self-test' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installed editor smoke test failed: $($process.ExitCode)" }
           $report = Join-Path (Resolve-Path 'ui-captures\runner').Path 'installed-gpu-report.json'
-          $process = Start-Process -FilePath $editor -ArgumentList @('--gpu-report', ('"{0}"' -f $report)) -Wait -PassThru
-          if ($process.ExitCode -ne 0) { throw "Installed GPU/CPU-fallback diagnostic failed: $($process.ExitCode)" }
+          # Use the same installed-path lookup that the user runs; it supports
+          # both the default folder and a custom Inno Setup install location.
+          & .\update-alpha.ps1 -GpuReport -ReportPath $report
+          if ($LASTEXITCODE -ne 0) { throw "Installed GPU/CPU-fallback diagnostic failed: $LASTEXITCODE" }
           $diagnostic = Get-Content $report -Raw | ConvertFrom-Json
           if (-not $diagnostic.packaged -or $diagnostic.max_channel_difference -ne 0 -or
               $diagnostic.export_max_channel_difference -ne 0 -or

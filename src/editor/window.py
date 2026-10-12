@@ -849,8 +849,10 @@ class ExportOptions(ctk.CTkToplevel):
         path_row = ctk.CTkFrame(self, fg_color="transparent")
         path_row.pack(fill="x", padx=24, pady=(5, 12))
         self.folder = ctk.StringVar()
-        ctk.CTkEntry(path_row, textvariable=self.folder, placeholder_text="Choose an export folder",
-                     width=365, fg_color="#1d2025").pack(side="left", padx=(0, 8))
+        self.folder_entry = ctk.CTkEntry(path_row, textvariable=self.folder,
+                                         placeholder_text="Choose an export folder",
+                                         width=365, fg_color="#1d2025")
+        self.folder_entry.pack(side="left", padx=(0, 8))
         ctk.CTkButton(path_row, text="Browse", width=95, command=self.browse,
                       fg_color="#363d47").pack(side="left")
 
@@ -885,6 +887,10 @@ class ExportOptions(ctk.CTkToplevel):
                                    fg_color="#1d2025")
         self.notice.pack(padx=25, pady=(0, 8))
         self.notice.insert(0, editor.batch.rights.get("copyright_notice", ""))
+        # CTkEntry wraps a native Entry whose bindtags do not reliably include
+        # this CTkToplevel on Windows. Bind the actual focused controls too.
+        for entry in (self.folder_entry, self.creator, self.notice):
+            entry.bind("<Escape>", lambda _event: self.close())
         ctk.CTkLabel(self, text="No signed credential or watermark. Rights are stored in .isphoto only.",
                      text_color="#d6a773", font=ctk.CTkFont(size=10)).pack(padx=25, pady=(0, 7))
         ctk.CTkLabel(self, text="Existing output names stop export; files are never overwritten.",

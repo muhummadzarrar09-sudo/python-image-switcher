@@ -90,6 +90,24 @@ def test_tampering_with_asset_is_detected(tmp_path):
         read_project(str(modified))
 
 
+def test_project_rejects_unsafe_identity_and_never_overwrites(tmp_path):
+    original = tmp_path / "in.jpg"
+    master = tmp_path / "out.png"
+    original.write_bytes(b"original")
+    master.write_bytes(b"master")
+    path = tmp_path / "photo.isphoto"
+    with pytest.raises(ValueError, match="safe ID"):
+        create_project(str(path), original=str(original), master=str(master),
+                       photo_number=1, photo_id="../outside")
+    create_project(str(path), original=str(original), master=str(master),
+                   photo_number=1, photo_id="safe-id")
+    original_bytes = path.read_bytes()
+    with pytest.raises(FileExistsError):
+        create_project(str(path), original=str(original), master=str(master),
+                       photo_number=2, photo_id="another")
+    assert path.read_bytes() == original_bytes
+
+
 def test_unsupported_version_and_excess_entries_rejected(tmp_path):
     original = tmp_path / "in.jpg"
     master = tmp_path / "out.png"

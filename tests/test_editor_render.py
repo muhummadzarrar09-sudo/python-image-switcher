@@ -90,6 +90,17 @@ def test_batch_exports_every_photo_and_reopens_project(tmp_path):
     assert render(imported, restored)[0].size == (40, 30)
 
 
+def test_reject_16bit_source_instead_of_silent_8bit_conversion(tmp_path):
+    path = tmp_path / "highbit.png"
+    Image.fromarray(np.full((16, 12), 32768, dtype=np.uint16)).save(path)
+    with pytest.raises(PhotoRenderError, match="16-bit|High-bit"):
+        source_info(str(path))
+    tiff = tmp_path / "highbit.tiff"
+    tifffile.imwrite(tiff, np.full((16, 12, 3), 32000, dtype=np.uint16), photometric="rgb")
+    with pytest.raises(PhotoRenderError, match="16-bit|High-bit"):
+        source_info(str(tiff))
+
+
 def test_reject_multiframe_instead_of_first_frame(tmp_path):
     path = tmp_path / "animated.webp"
     frames = [Image.new("RGB", (8, 8), color) for color in ("red", "blue")]

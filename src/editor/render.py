@@ -26,6 +26,26 @@ class PhotoRenderError(ValueError):
     pass
 
 
+def _check_depth(path: str, image: Image.Image) -> None:
+    """Refuse precision/color spaces that this renderer cannot preserve yet."""
+    ext = Path(path).suffix.lower()
+    if ext in (".avif", ".heic", ".heif"):
+        raise PhotoRenderError("HEIC/AVIF bit depth and color management are not yet validated for fidelity-safe editing")
+    if image.mode in ("I;16", "I;16B", "I;16L", "I", "F", "CMYK"):
+        raise PhotoRenderError("High-bit-depth or CMYK photo cannot be preserved by this renderer yet")
+    if ext == ".png":
+        with open(path, "rb") as source:
+            header = source.read(25)
+        if header.startswith(b"\x89PNG\r\n\x1a\n") and len(header) >= 25 and header[24] > 8:
+            raise PhotoRenderError("16-bit PNG editing is not supported without precision loss")
+    if ext in (".tif", ".tiff"):
+        bits = getattr(image, "tag_v2", {}).get(258, (8,))
+        if isinstance(bits, int):
+            bits = (bits,)
+        if any(bit > 8 for bit in bits):
+            raise PhotoRenderError("16-bit TIFF editing is not supported without precision loss")
+
+
 def _open_source(path: str, *, preview: bool = False) -> tuple[Image.Image | np.ndarray, bytes | None, bool]:
     ext = Path(path).suffix.lower()
     if ext not in STILL_EXTENSIONS:
@@ -57,11 +77,13 @@ def _open_source(path: str, *, preview: bool = False) -> tuple[Image.Image | np.
                 raise PhotoRenderError("Animated/multipage files are outside the still-photo editor")
             if image.width * image.height > MAX_RENDER_PIXELS:
                 raise PhotoRenderError("Photo exceeds the current safe processing size")
+            _check_depth(path, image)
             profile = image.info.get("icc_profile")
             if preview:
                 image.thumbnail((1400, 1000), Image.Resampling.LANCZOS)
             image = ImageOps.exif_transpose(image)
-            return image.convert("RGBA" if "A" in image.getbands() else "RGB"), profile, False
+            has_alpha = "A" in image.getbands() or "transparency" in image.info
+            return image.convert("RGBA" if has_alpha else "RGB"), profile, False
     except PhotoRenderError:
         raise
     except Exception as exc:
@@ -84,6 +106,7 @@ def source_info(path: str) -> dict:
                 raise PhotoRenderError("Animated/multipage files are outside the still-photo editor")
             if image.width * image.height > MAX_RENDER_PIXELS:
                 raise PhotoRenderError("Photo exceeds the current safe processing size")
+            _check_depth(path, image)
             return {"size": image.size, "raw": False}
     except PhotoRenderError:
         raise
@@ -164,8 +187,9 @@ def render(photo: Photo, batch: BatchSession, *, preview: bool = False) -> tuple
     np.clip(color, 0, 1, out=color)
     if values["sharpness"]:
         # Unsharp mask in the current float32 working depth, including 16-bit RAW.
-        blurred = (color + np.roll(color, 1, 0) + np.roll(color, -1, 0)
-                   + np.roll(color, 1, 1) + np.roll(color, -1, 1)) / 5
+        padded = np.pad(color, ((1, 1), (1, 1), (0, 0)), mode="edge")
+        blurred = (color + padded[:-2, 1:-1] + padded[2:, 1:-1]
+                   + padded[1:-1, :-2] + padded[1:-1, 2:]) / 5
         color[:] = np.clip(color + (color - blurred) * values["sharpness"], 0, 1)
     if raw:
         return np.round(color * depth).astype(np.uint16), profile, True

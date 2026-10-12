@@ -11,7 +11,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
+import re
 import tempfile
 import zipfile
 
@@ -103,8 +103,8 @@ def create_project(path: str, *, original: str, master: str, photo_number: int,
     C2PA, when available, belongs on the *inner final master* and is not
     implied by a manifest SHA-256 checksum.
     """
-    if photo_number < 1 or not photo_id:
-        raise ValueError("A stable positive photo number and ID are required")
+    if type(photo_number) is not int or photo_number < 1 or not isinstance(photo_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", photo_id):
+        raise ValueError("A stable positive photo number and safe ID are required")
     if Path(master).suffix.lower() not in (".png", ".tif", ".tiff"):
         raise ValueError("Project master must be a lossless PNG or TIFF")
     sources = {"original": original, "master": master}
@@ -163,10 +163,14 @@ def read_project(path: str) -> PhotoProject:
                 raise ProjectError("Manifest exceeds safety limit")
             with archive.open("manifest.json") as stream:
                 manifest = json.load(stream)
+            if not isinstance(manifest, dict):
+                raise ProjectError("Invalid project manifest")
             if manifest.get("type") != "ImageSwitcherPhoto" or manifest.get("version") != VERSION:
                 raise ProjectError("Unsupported photo project version")
-            if not isinstance(manifest.get("photo_number"), int) or manifest["photo_number"] < 1:
+            if type(manifest.get("photo_number")) is not int or manifest["photo_number"] < 1:
                 raise ProjectError("Invalid photo number")
+            if not isinstance(manifest.get("photo_id"), str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", manifest["photo_id"]):
+                raise ProjectError("Invalid photo ID")
             files = manifest.get("files", {})
             if not isinstance(files, dict) or not {"original", "master"} <= files.keys():
                 raise ProjectError("Missing original or master")
@@ -177,7 +181,7 @@ def read_project(path: str) -> PhotoProject:
             if sum(info.file_size for info in infos) > MAX_TOTAL_BYTES:
                 raise ProjectError("Project exceeds safety limit")
             for key, item in files.items():
-                if item.get("entry") != f"assets/{key}" or not isinstance(item.get("size"), int):
+                if not isinstance(item, dict) or item.get("entry") != f"assets/{key}" or type(item.get("size")) is not int:
                     raise ProjectError("Invalid asset entry")
                 _safe_filename(item["filename"])
                 info = archive.getinfo(item["entry"])
@@ -191,6 +195,6 @@ def read_project(path: str) -> PhotoProject:
                         digest.update(block)
                 if digest.hexdigest() != item["sha256"]:
                     raise ProjectError("Asset checksum mismatch")
-    except (zipfile.BadZipFile, KeyError, TypeError, json.JSONDecodeError, OSError) as exc:
+    except (zipfile.BadZipFile, KeyError, TypeError, UnicodeError, RuntimeError, json.JSONDecodeError, OSError) as exc:
         raise ProjectError(f"Invalid or damaged photo project: {exc}") from exc
     return PhotoProject(os.path.abspath(path), manifest)

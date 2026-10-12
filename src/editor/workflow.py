@@ -69,6 +69,7 @@ def import_project(batch: BatchSession, path: str, directory: str) -> Photo:
     if os.path.exists(target):
         raise FileExistsError(f"Project extraction directory already exists: {target}")
     os.makedirs(target)
+    photo = None
     try:
         original = project.copy_original(os.path.join(target, "original"))
         background = project.copy_background(os.path.join(target, "background"))
@@ -91,5 +92,7 @@ def import_project(batch: BatchSession, path: str, directory: str) -> Photo:
         photo.rights = dict(project.manifest.get("rights", {}))
         return photo
     except Exception:
+        if photo is not None and photo in batch.photos:
+            batch.photos.remove(photo)
         shutil.rmtree(target)
         raise

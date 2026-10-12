@@ -1,11 +1,11 @@
 ; DEVELOPMENT PREVIEW ONLY — not yet verified on a clean Windows 11 machine.
-; Build first: python build_exe.py --onedir
+; Build first: python build_editor.py
 ; Then compile with Inno Setup 6: iscc installer.iss
 #define MyAppName "Image Switcher"
 #define MyAppVersion "0.2.0-preview"
 #define MyAppPublisher "Image Switcher Team"
 #define MyAppURL "https://github.com/muhummadzarrar09-sudo/python-image-switcher"
-#define MyAppExeName "ImageSwitcher.exe"
+#define MyAppExeName "ImageSwitcherEditor.exe"
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
@@ -35,7 +35,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 
 [Files]
-Source: "dist\ImageSwitcher\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\ImageSwitcherEditor\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

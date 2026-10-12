@@ -23,12 +23,18 @@ def test_named_adjustment_sliders_and_export_dialog_do_not_write_early(tmp_path)
         editor = EditorWindow(root)
         root.update()
         assert set(editor.sliders) == set(EDIT_FIELDS)
+        assert "sharpness" in editor.sliders and "sharpening" not in editor.sliders
         assert set(editor.value_labels) == set(EDIT_FIELDS)
         assert not hasattr(editor, "field")  # no single category/dropdown selector
         assert not hasattr(editor, "creator")  # rights appear only inside export
         photo = editor.batch.add_photo(str(source))
         editor.select(photo.number)
-        editor.scope.set("Selected photo (protect)")
+        assert photo.id in editor._thumbnail_cache
+        editor.view_mode.set("Before")
+        editor.show_current()  # real source preview, no non-functional before button
+        editor.view_mode.set("After")
+        editor.show_current()
+        editor.scope.set("Selected")
         editor.sync_sliders()
         editor.change_value("contrast", 0.3)
         assert photo.protected

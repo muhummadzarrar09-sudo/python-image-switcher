@@ -45,7 +45,7 @@ jobs:
             Write-Host "::error file=installer.iss,line=1::$($_.Exception.Message)"
             exit 1
           }
-          $setup = Resolve-Path '.\dist\ImageSwitcher-Setup-0.2.0-alpha.2.exe'
+          $setup = Resolve-Path '.\dist\ImageSwitcher-Setup-0.2.0-alpha.3.exe'
           $process = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/NORESTART', '/SUPPRESSMSGBOXES') -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Setup failed: $($process.ExitCode)" }
           $directory = Join-Path $env:LOCALAPPDATA 'Programs\Image Switcher'
@@ -65,6 +65,6 @@ jobs:
           if (Test-Path $editor) { throw "Installed editor remained after uninstall: $editor" }
       - uses: actions/upload-artifact@v4
         with:
-          name: image-switcher-alpha-0.2.0-alpha.2-unsigned
-          path: dist/ImageSwitcher-Setup-0.2.0-alpha.2.exe
+          name: image-switcher-alpha-0.2.0-alpha.3-unsigned
+          path: dist/ImageSwitcher-Setup-0.2.0-alpha.3.exe
           if-no-files-found: error

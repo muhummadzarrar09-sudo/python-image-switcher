@@ -15,7 +15,7 @@ import customtkinter as ctk
 from PIL import Image, ImageColor, ImageTk
 
 from .batch import BatchSession, EDIT_FIELDS
-from .render import STILL_EXTENSIONS, render, source_info
+from .render import STILL_EXTENSIONS, render, source_info, _open_source
 from .workflow import export_batch, import_project
 from .version import ALPHA_VERSION
 
@@ -35,62 +35,96 @@ class EditorWindow(ctk.CTkToplevel):
         self.crop_window: CropTools | None = None
         self.background_window: BackgroundTools | None = None
         self._preview_image = None
+        self._thumbnail_cache: dict[str, ctk.CTkImage] = {}
+        self.view_mode = ctk.StringVar(value="After")
         self._canvas_bounds = (0, 0, 0, 0)
         self._resize_job = None
         self._syncing_sliders = False
         self.sliders: dict[str, ctk.CTkSlider] = {}
         self.value_labels: dict[str, ctk.CTkLabel] = {}
         self.scope = ctk.StringVar(value="Batch")
+        self.configure(fg_color="#16181c")
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(2, weight=1)
 
-        bar = ctk.CTkFrame(self)
-        bar.grid(row=0, column=0, columnspan=3, sticky="ew", padx=8, pady=(6, 2))
-        for text, action in (("Add photos", self.add_files), ("Open batch", self.open_session),
-                             ("Save batch", self.save_session), ("Open .isphoto", self.open_project),
-                             ("Crop / rotate", self.open_crop_tools),
-                             ("Background / mask", self.open_background_tools),
-                             ("Export...", self.export)):
-            ctk.CTkButton(bar, text=text, command=action, width=112).pack(side="left", padx=3, pady=5)
+        # The selected export concept is the visual reference: compact dark
+        # chrome, a thumbnail rail, large photo surface, and direct adjustments.
+        header = ctk.CTkFrame(self, height=56, fg_color="#1a1c21", corner_radius=0)
+        header.grid(row=0, column=0, columnspan=3, sticky="ew")
+        header.grid_propagate(False)
+        ctk.CTkLabel(header, text="IS", width=33, height=33, fg_color="#173a68",
+                     corner_radius=7, font=ctk.CTkFont(size=16, weight="bold")).pack(side="left", padx=(13, 9), pady=10)
+        ctk.CTkLabel(header, text="Image Switcher Alpha",
+                     font=ctk.CTkFont(size=17, weight="bold")).pack(side="left")
+        ctk.CTkButton(header, text="Export", width=110, height=34, fg_color="#19539a",
+                      hover_color="#2568ba", command=self.export).pack(side="right", padx=14)
 
-        controls = ctk.CTkFrame(self, fg_color="transparent")
-        controls.grid(row=1, column=0, columnspan=3, sticky="ew", padx=10, pady=(0, 3))
-        ctk.CTkLabel(controls, text="Adjust:").pack(side="left", padx=(5, 3))
-        ctk.CTkOptionMenu(controls, variable=self.scope, values=["Batch", "Selected photo (protect)"],
-                          width=205, command=lambda _: self.sync_sliders()).pack(side="left", padx=4)
-        ctk.CTkButton(controls, text="Unlock selected", width=115, fg_color="#555",
-                      command=self.unlock).pack(side="left", padx=6)
-        self.status = ctk.CTkLabel(controls, text="Add still photos to begin", anchor="w")
-        self.status.pack(side="left", padx=10, fill="x", expand=True)
+        toolbar = ctk.CTkFrame(self, height=51, fg_color="#202329", corner_radius=0)
+        toolbar.grid(row=1, column=0, columnspan=3, sticky="ew")
+        toolbar.grid_propagate(False)
+        for text, action in (("+  Add photos", self.add_files), ("Open batch", self.open_session),
+                             ("Save batch", self.save_session), ("Open project", self.open_project),
+                             ("Crop / rotate", self.open_crop_tools), ("Background / mask", self.open_background_tools)):
+            ctk.CTkButton(toolbar, text=text, command=action, height=32, width=96,
+                          fg_color="#32363e", hover_color="#414955", corner_radius=6).pack(side="left", padx=3, pady=8)
+        ctk.CTkSegmentedButton(toolbar, variable=self.scope, values=["Selected", "Batch"],
+                               width=153, height=32, selected_color="#205da7",
+                               selected_hover_color="#286cbe", command=lambda _: self.sync_sliders()).pack(side="right", padx=(3, 14))
+        ctk.CTkLabel(toolbar, text="Scope", text_color="#aab0b9").pack(side="right", padx=7)
+        ctk.CTkButton(toolbar, text="Unlock", command=self.unlock, width=70, height=32,
+                      fg_color="#32363e", hover_color="#414955").pack(side="right", padx=3)
 
-        sidebar = ctk.CTkFrame(self, width=225)
-        sidebar.grid(row=2, column=0, sticky="nsew", padx=(8, 4), pady=4)
+        sidebar = ctk.CTkFrame(self, width=188, fg_color="#21252b", corner_radius=0)
+        sidebar.grid(row=2, column=0, sticky="nsew", padx=(7, 3), pady=(5, 7))
         sidebar.grid_propagate(False)
-        ctk.CTkLabel(sidebar, text="NUMBERED BATCH", font=ctk.CTkFont(weight="bold")).pack(pady=8)
-        self.items = ctk.CTkScrollableFrame(sidebar, width=204)
-        self.items.pack(fill="both", expand=True, padx=5, pady=5)
-        ctk.CTkLabel(sidebar, text="Locked = individual edits preserved;\nstill included in full-batch export.",
-                     text_color="#c2c2c2", justify="left").pack(pady=8)
+        rail_top = ctk.CTkFrame(sidebar, fg_color="transparent")
+        rail_top.pack(fill="x", padx=10, pady=(12, 6))
+        ctk.CTkLabel(rail_top, text="PHOTOS", anchor="w", text_color="#c8cdd6",
+                     font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
+        self.batch_count = ctk.CTkLabel(rail_top, text="0", width=27, height=23,
+                                        corner_radius=7, fg_color="#343a43")
+        self.batch_count.pack(side="right")
+        self.items = ctk.CTkScrollableFrame(sidebar, width=164, fg_color="transparent")
+        self.items.pack(fill="both", expand=True, padx=5, pady=2)
+        ctk.CTkLabel(sidebar, text="🔒 Protected edits stay in the batch",
+                     text_color="#aab0b9", wraplength=175, font=ctk.CTkFont(size=10)).pack(pady=8)
 
-        self.canvas = tk.Canvas(self, width=680, height=540, bg="#171717", highlightthickness=0)
-        self.canvas.grid(row=2, column=1, sticky="nsew", padx=4, pady=4)
+        workspace = ctk.CTkFrame(self, fg_color="#17191d", corner_radius=0)
+        workspace.grid(row=2, column=1, sticky="nsew", padx=(0, 3), pady=(5, 7))
+        workspace.grid_rowconfigure(0, weight=1)
+        workspace.grid_columnconfigure(0, weight=1)
+        self.canvas = tk.Canvas(workspace, bg="#17191d", highlightthickness=0)
+        self.canvas.grid(row=0, column=0, sticky="nsew", padx=10, pady=(10, 0))
         self.canvas.bind("<Button-1>", self.paint_mask)
         self.canvas.bind("<Configure>", self.on_canvas_resize)
+        footer = ctk.CTkFrame(workspace, height=50, fg_color="#1b1e23", corner_radius=0)
+        footer.grid(row=1, column=0, sticky="ew")
+        self.status = ctk.CTkLabel(footer, text="Add still photos to begin", anchor="w",
+                                   text_color="#aab0b9", font=ctk.CTkFont(size=11))
+        self.status.pack(side="left", padx=15, fill="x", expand=True)
+        ctk.CTkLabel(footer, text="Fit preview · full resolution on export", text_color="#858e9b",
+                     font=ctk.CTkFont(size=10)).pack(side="right", padx=(5, 15))
+        ctk.CTkSegmentedButton(footer, variable=self.view_mode, values=["Before", "After"],
+                               width=138, height=30, selected_color="#205da7",
+                               command=lambda _: self.show_current()).pack(side="right", padx=5, pady=8)
 
-        panel = ctk.CTkScrollableFrame(self, width=272)
-        panel.grid(row=2, column=2, sticky="ns", padx=(4, 8), pady=4)
-        ctk.CTkLabel(panel, text="ADJUSTMENTS", font=ctk.CTkFont(size=18, weight="bold")).pack(pady=(8, 12))
-        # No category selector: every edit setting and its value is directly visible.
+        panel = ctk.CTkScrollableFrame(self, width=267, fg_color="#272c33", corner_radius=0)
+        panel.grid(row=2, column=2, sticky="ns", padx=(3, 8), pady=(5, 7))
+        ctk.CTkLabel(panel, text="ADJUSTMENTS", anchor="w", text_color="#c9ced7",
+                     font=ctk.CTkFont(size=12, weight="bold")).pack(fill="x", padx=12, pady=(14, 17))
+        # Real capabilities only: do not create fake Whites/Clarity/Denoise
+        # controls simply because the AI mockup drew them.
         for field, (low, high) in EDIT_FIELDS.items():
             row = ctk.CTkFrame(panel, fg_color="transparent")
-            row.pack(fill="x", padx=6, pady=(0, 13))
-            header = ctk.CTkFrame(row, fg_color="transparent")
-            header.pack(fill="x")
-            ctk.CTkLabel(header, text=field.replace("_", " ").title(), anchor="w",
-                         font=ctk.CTkFont(size=13)).pack(side="left")
-            label = ctk.CTkLabel(header, text="0.00", anchor="e", width=46, text_color="#aaa")
+            row.pack(fill="x", padx=9, pady=(0, 10))
+            line = ctk.CTkFrame(row, fg_color="transparent")
+            line.pack(fill="x")
+            ctk.CTkLabel(line, text=field.replace("_", " ").title(), anchor="w",
+                         font=ctk.CTkFont(size=12)).pack(side="left")
+            label = ctk.CTkLabel(line, text="+0.00", anchor="e", width=48, text_color="#bbc1cc")
             label.pack(side="right")
-            slider = ctk.CTkSlider(row, from_=low, to=high, number_of_steps=200,
+            slider = ctk.CTkSlider(row, from_=low, to=high, number_of_steps=200, height=15,
+                                   button_length=15, progress_color="#2764a9", fg_color="#434850",
                                    command=lambda value, key=field: self.change_value(key, value))
             slider.pack(fill="x", pady=(5, 0))
             self.sliders[field] = slider
@@ -123,16 +157,40 @@ class EditorWindow(ctk.CTkToplevel):
         if errors:
             self.error("\n".join(errors[:8]))
 
+    def thumbnail(self, photo):
+        """Cache a small original preview; never re-render full-resolution photos for the rail."""
+        if photo.id not in self._thumbnail_cache:
+            background = Image.new("RGBA", (146, 82), "#343943")
+            try:
+                image, _, _ = _open_source(photo.source, preview=True)
+                if not isinstance(image, Image.Image):
+                    image = Image.fromarray((image / 257).astype("uint8"))
+                image = image.convert("RGBA")
+                image.thumbnail((146, 82), Image.Resampling.LANCZOS)
+                x, y = (146-image.width)//2, (82-image.height)//2
+                background.alpha_composite(image, (x, y))
+            except Exception:
+                pass  # missing source is still visibly numbered; export reports the error
+            rgb = background.convert("RGB")
+            self._thumbnail_cache[photo.id] = ctk.CTkImage(light_image=rgb, dark_image=rgb,
+                                                            size=(146, 82))
+        return self._thumbnail_cache[photo.id]
+
     def refresh_list(self):
         for child in self.items.winfo_children():
             child.destroy()
+        self.batch_count.configure(text=str(len(self.batch.photos)))
         for photo in self.batch.photos:
-            marker = "🔒" if photo.protected else "•"
-            color = "#bd7c34" if photo.protected else ("#3476a8" if photo.number == self.current else "#333")
-            ctk.CTkButton(self.items, text=f"#{photo.number:04d} {marker} {Path(photo.source).name[:17]}",
-                          fg_color=color, anchor="w", command=lambda n=photo.number: self.select(n)).pack(fill="x", pady=2)
+            selected = photo.number == self.current
+            marker = "🔒" if photo.protected else ""
+            ctk.CTkButton(self.items, text=f"#{photo.number:04d} {marker}  {Path(photo.source).stem[:10]}",
+                          image=self.thumbnail(photo), compound="top", width=157, height=119,
+                          border_width=2 if selected else 0, border_color="#5195e9",
+                          fg_color="#17385f" if selected else "#30353c",
+                          hover_color="#375273", corner_radius=7,
+                          command=lambda n=photo.number: self.select(n)).pack(fill="x", pady=4)
         if self.batch.photos:
-            self.status.configure(text=f"{len(self.batch.photos)} photos | protected: {self.batch.excluded_numbers} | all export")
+            self.status.configure(text=f"{len(self.batch.photos)} photos · protected: {self.batch.excluded_numbers} · full batch includes all")
         else:
             self.status.configure(text="Add still photos to begin")
 
@@ -284,7 +342,7 @@ class EditorWindow(ctk.CTkToplevel):
         self.show_current()
 
     def paint_mask(self, event):
-        if not self.mask_painting or self.current is None:
+        if not self.mask_painting or self.current is None or self.view_mode.get() != "After":
             return
         try:
             photo = self.selected_photo()
@@ -317,7 +375,11 @@ class EditorWindow(ctk.CTkToplevel):
             return
         try:
             photo = self.selected_photo()
-            image, _, _ = render(photo, self.batch, preview=True)
+            before = self.view_mode.get() == "Before"
+            if before:
+                image, _, _ = _open_source(photo.source, preview=True)
+            else:
+                image, _, _ = render(photo, self.batch, preview=True)
             if not isinstance(image, Image.Image):
                 image = Image.fromarray((image / 257).astype("uint8"))
             image.thumbnail((canvas_w-20, canvas_h-20), Image.Resampling.LANCZOS)
@@ -326,9 +388,9 @@ class EditorWindow(ctk.CTkToplevel):
             left, top = (canvas_w-width)//2, (canvas_h-height)//2
             self._canvas_bounds = (left, top, width, height)
             self.canvas.create_image(left, top, anchor="nw", image=self._preview_image)
-            self.canvas.create_text(8, 8, anchor="nw",
-                                    text=f"#{photo.number:04d} {'PROTECTED' if photo.protected else 'BATCH'} | preview only",
-                                    fill="white", font=("Arial", 12, "bold"))
+            state = "🔒 Protected" if photo.protected else "Batch"
+            kind = "Source preview" if before else "Edited preview"
+            self.status.configure(text=f"#{photo.number:04d} · {state} · {kind} · {Path(photo.source).name[:28]}")
         except Exception as exc:
             self._canvas_bounds = (0, 0, 0, 0)
             self.canvas.create_text(10, 20, anchor="nw", fill="orange", text=str(exc)[:105])
@@ -352,6 +414,7 @@ class EditorWindow(ctk.CTkToplevel):
                 self.close_crop_tools()
                 self.close_background_tools()
                 self.batch = loaded
+                self._thumbnail_cache.clear()
                 self.session_path = path
                 self.current = self.batch.photos[0].number if self.batch.photos else None
                 self.refresh_list()
@@ -461,7 +524,7 @@ class BackgroundTools(ctk.CTkToplevel):
                           values=["Paint background", "Erase from mask"],
                           command=lambda value: setattr(editor, "brush_add", value == "Paint background")).pack(pady=8)
         ctk.CTkButton(self, text="Clear mask strokes", fg_color="#555", command=editor.clear_mask).pack(pady=4)
-        ctk.CTkLabel(self, text="While this tool is open, click the photo to paint.\n"
+        ctk.CTkLabel(self, text="Select After, then click the photo to paint.\n"
                      "Erase corrects mistakes; no automatic selection yet.",
                      text_color="#bbb", justify="center").pack(pady=6)
 
@@ -494,50 +557,90 @@ class ExportOptions(ctk.CTkToplevel):
     def __init__(self, editor: EditorWindow):
         super().__init__(editor)
         self.editor = editor
-        self.title("Export options")
-        self.geometry("490x545")
+        self.title("Export photos")
         self.resizable(False, False)
         self.transient(editor)
         self.protocol("WM_DELETE_WINDOW", self.close)
-        ctk.CTkLabel(self, text="EXPORT PHOTOS", font=ctk.CTkFont(size=18, weight="bold")).pack(pady=(14, 4))
-        ctk.CTkLabel(self, text="Choose where and what to export. Nothing is written until Export now.",
-                     text_color="#bbb", wraplength=455).pack(padx=15, pady=(0, 12))
-        ctk.CTkLabel(self, text="Destination folder", anchor="w").pack(fill="x", padx=22)
+        self.shade = None
+        try:
+            shade = ctk.CTkToplevel(editor)
+            self.shade = shade
+            shade.overrideredirect(True)
+            shade.configure(fg_color="#000000")
+            shade.attributes("-alpha", 0.42)
+            shade.geometry(f"{editor.winfo_width()}x{editor.winfo_height()}+"
+                           f"{editor.winfo_rootx()}+{editor.winfo_rooty()}")
+            shade.lift(editor)
+            self.shade = shade
+        except tk.TclError:
+            if self.shade and self.shade.winfo_exists():
+                self.shade.destroy()
+            self.shade = None  # platform cannot dim: modal must still work
+        width, height = 530, 575
+        x = editor.winfo_rootx() + max(0, (editor.winfo_width()-width)//2)
+        y = editor.winfo_rooty() + max(0, (editor.winfo_height()-height)//2)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+        self.configure(fg_color="#25282d")
+        self.lift(self.shade if self.shade else editor)
+
+        ctk.CTkLabel(self, text="Export photos", anchor="w",
+                     font=ctk.CTkFont(size=19, weight="bold")).pack(fill="x", padx=26, pady=(18, 14))
+        ctk.CTkLabel(self, text="Destination", anchor="w", font=ctk.CTkFont(size=12, weight="bold")).pack(fill="x", padx=26)
         path_row = ctk.CTkFrame(self, fg_color="transparent")
-        path_row.pack(fill="x", padx=18, pady=5)
+        path_row.pack(fill="x", padx=24, pady=(5, 12))
         self.folder = ctk.StringVar()
-        ctk.CTkEntry(path_row, textvariable=self.folder, width=325).pack(side="left", padx=(0, 6))
-        ctk.CTkButton(path_row, text="Browse", width=100, command=self.browse).pack(side="left")
-        ctk.CTkLabel(self, text="Photos", anchor="w").pack(fill="x", padx=22, pady=(8, 0))
+        ctk.CTkEntry(path_row, textvariable=self.folder, placeholder_text="Choose an export folder",
+                     width=365, fg_color="#1d2025").pack(side="left", padx=(0, 8))
+        ctk.CTkButton(path_row, text="Browse", width=95, command=self.browse,
+                      fg_color="#363d47").pack(side="left")
+
+        ctk.CTkLabel(self, text="Export scope", anchor="w", font=ctk.CTkFont(size=12, weight="bold")).pack(fill="x", padx=26)
         self.selection = ctk.StringVar(value="Entire numbered batch (includes protected)")
-        choices = [self.selection.get()]
+        ctk.CTkRadioButton(self, text="Entire numbered batch (includes protected)",
+                           variable=self.selection, value="Entire numbered batch (includes protected)").pack(anchor="w", padx=29, pady=(6, 4))
         if editor.current is not None:
-            choices.append(f"Selected photo #{editor.current:04d} only")
-        ctk.CTkOptionMenu(self, variable=self.selection, values=choices, width=446).pack(pady=5)
-        ctk.CTkLabel(self, text="Lossless master: PNG for 8-bit sources, 16-bit TIFF for NEF.\n"
-                     "Every exported photo also gets an editable .isphoto copy.\n"
-                     "Originals remain untouched; existing export names are never replaced.",
-                     text_color="#b9d5e9", wraplength=440, justify="left").pack(padx=20, pady=(12, 8))
-        ctk.CTkLabel(self, text="Project rights (declarations only)", anchor="w").pack(fill="x", padx=22)
-        self.creator = ctk.CTkEntry(self, placeholder_text="Creator name (optional)", width=440)
-        self.creator.pack(pady=(5, 4))
+            ctk.CTkRadioButton(self, text=f"Selected photo #{editor.current:04d} only",
+                               variable=self.selection, value=f"Selected photo #{editor.current:04d} only").pack(anchor="w", padx=29, pady=(0, 12))
+        else:
+            ctk.CTkLabel(self, text="Select a photo to enable single-photo export.",
+                         text_color="#939ca8", anchor="w").pack(fill="x", padx=56, pady=(0, 12))
+
+        ctk.CTkLabel(self, text="Format", anchor="w", font=ctk.CTkFont(size=12, weight="bold")).pack(fill="x", padx=26)
+        ctk.CTkLabel(self, text="Lossless PNG (8-bit)  /  16-bit TIFF (NEF) — automatic",
+                     fg_color="#1d2025", corner_radius=6, anchor="w", height=32,
+                     text_color="#d2d9e3").pack(fill="x", padx=25, pady=(4, 3))
+        ctk.CTkLabel(self, text="The decoded JPG cannot regain detail discarded by the source.",
+                     text_color="#aab3be", anchor="w", font=ctk.CTkFont(size=10)).pack(fill="x", padx=27, pady=(0, 11))
+        self.project_included = ctk.IntVar(value=1)
+        ctk.CTkCheckBox(self, text="Include .isphoto project and untouched original",
+                        variable=self.project_included, state="disabled", font=ctk.CTkFont(size=12)).pack(anchor="w", padx=28, pady=(0, 12))
+
+        ctk.CTkLabel(self, text="Project rights (unsigned declarations)", anchor="w",
+                     font=ctk.CTkFont(size=12, weight="bold")).pack(fill="x", padx=26)
+        self.creator = ctk.CTkEntry(self, placeholder_text="Creator name (optional)", width=480,
+                                    fg_color="#1d2025")
+        self.creator.pack(padx=25, pady=(5, 4))
         self.creator.insert(0, editor.batch.rights.get("creator", ""))
-        self.notice = ctk.CTkEntry(self, placeholder_text="Copyright notice (optional)", width=440)
-        self.notice.pack(pady=4)
+        self.notice = ctk.CTkEntry(self, placeholder_text="Copyright notice (optional)", width=480,
+                                   fg_color="#1d2025")
+        self.notice.pack(padx=25, pady=(0, 8))
         self.notice.insert(0, editor.batch.rights.get("copyright_notice", ""))
-        ctk.CTkLabel(self, text="Rights go in .isphoto only. No signed credentials or watermark yet.",
-                     text_color="#e0ab71", wraplength=440).pack(padx=16, pady=7)
+        ctk.CTkLabel(self, text="No signed credential or watermark. Rights are stored in .isphoto only.",
+                     text_color="#d6a773", font=ctk.CTkFont(size=10)).pack(padx=25, pady=(0, 7))
+        ctk.CTkLabel(self, text="Existing output names stop export; files are never overwritten.",
+                     text_color="#bbc4cf", font=ctk.CTkFont(size=11)).pack(padx=25, pady=(0, 7))
         actions = ctk.CTkFrame(self, fg_color="transparent")
-        actions.pack(pady=(9, 12))
-        ctk.CTkButton(actions, text="Cancel", width=135, fg_color="#555",
-                      command=self.close).pack(side="left", padx=8)
-        ctk.CTkButton(actions, text="Export now", width=145,
-                      command=self.confirm).pack(side="left", padx=8)
+        actions.pack(anchor="e", padx=25, pady=(4, 14))
+        ctk.CTkButton(actions, text="Cancel", width=100, fg_color="#363d47",
+                      command=self.close).pack(side="left", padx=(0, 9))
+        ctk.CTkButton(actions, text="Export now", width=115, fg_color="#1e64b8",
+                      command=self.confirm).pack(side="left")
         self.after_idle(self._grab_when_visible)
 
     def _grab_when_visible(self):
         if self.winfo_exists():
             try:
+                self.lift(self.shade if self.shade and self.shade.winfo_exists() else self.editor)
                 self.grab_set()
             except tk.TclError:
                 self.after(50, self._grab_when_visible)
@@ -560,4 +663,6 @@ class ExportOptions(ctk.CTkToplevel):
     def close(self):
         if self.grab_current() == self:
             self.grab_release()
+        if self.shade and self.shade.winfo_exists():
+            self.shade.destroy()
         self.destroy()

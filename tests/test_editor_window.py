@@ -139,6 +139,39 @@ def test_export_escape_closes_without_writing(tmp_path, tk_root):
         editor.destroy()
 
 
+def test_large_numbered_batch_keeps_rail_widget_count_bounded(tmp_path, tk_root):
+    from PIL import Image
+    from src.editor.window import EditorWindow, RAIL_PAGE_SIZE
+
+    source = tmp_path / "many.jpg"
+    Image.new("RGB", (32, 24), "blue").save(source)
+    editor = EditorWindow(tk_root)
+    try:
+        tk_root.update()
+        for _ in range(505):
+            editor.batch.add_photo(str(source))
+        editor.refresh_list()
+        assert len(editor.batch.photos) == 505
+        assert len(editor._tiles) == RAIL_PAGE_SIZE
+        assert editor.page_label.cget("text") == "1 / 11"
+        editor.select(505)
+        assert editor._rail_page == 10
+        assert editor.page_label.cget("text") == "11 / 11"
+        assert len(editor._tiles) == 25  # no 505-widget freeze
+        assert editor.batch_count.cget("text") == "505"
+        last = editor.batch.get(505)
+        editor.batch.edit_photo(505, "contrast", .2)
+        editor.refresh_list()
+        assert last.protected and last.id in editor._tiles
+        assert editor._tiles[last.id][2].cget("text").startswith("LOCKED")
+        editor.change_rail_page(-1)
+        assert len(editor._tiles) == RAIL_PAGE_SIZE
+        assert last.id not in editor._tiles  # still in batch, not removed
+        assert editor.batch.get(505).protected
+    finally:
+        editor.destroy()
+
+
 def test_latest_preview_wins_after_fast_selection_and_edits(tmp_path, tk_root):
     from PIL import Image
     from src.editor.window import EditorWindow

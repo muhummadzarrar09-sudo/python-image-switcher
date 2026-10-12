@@ -1,4 +1,4 @@
-# Still-photo editor alpha 0.2.0-alpha.5
+# Still-photo editor alpha 0.2.0-alpha.6
 
 This is an **unsigned, incomplete alpha**, not a production release. See [EDITOR_STATUS.md](EDITOR_STATUS.md) for supported features and blocked fidelity/ownership workflows. The editor installer packages the standalone editor, not the older converter.
 
@@ -10,7 +10,7 @@ Open PowerShell in the checkout directory after switching to the alpha branch:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\update-alpha.ps1
 ```
 
-The script finds/installs Python 3.11 when missing, creates/updates the ignored `.venv`, verifies dependencies and tests, builds the windowed executable, locates/installs Inno Setup 6 and compiles the unsigned alpha setup. **If the editor is already installed, close it first:** the script detects the existing executable, performs a quiet **in-place update** using the stable Inno AppId and previous installation path, then smoke-tests the updated executable. It does not create a second app or remove your photos, exports or sessions. Only a first-time setup launches the interactive wizard. The updater stops on failures and never switches your Git branch. Missing dependencies/tools require network access; the alpha is unsigned.
+The script finds/installs Python 3.11 when missing, creates/updates the ignored `.venv`, verifies dependencies and tests, **best-effort installs the optional OpenCL Python runtime** (CPU fallback if unavailable), builds the windowed executable, locates/installs Inno Setup 6 and compiles the unsigned alpha setup. **If the editor is already installed, close it first:** the script detects the existing executable, performs a quiet **in-place update** using the stable Inno AppId and previous installation path, then smoke-tests the updated executable. It does not create a second app or remove your photos, exports or sessions. Only a first-time setup launches the interactive wizard. The updater stops on failures and never switches your Git branch. Missing dependencies/tools require network access; the alpha is unsigned.
 
 To install dependencies and run tests **without building or installing** the desktop app:
 
@@ -27,10 +27,10 @@ py -3.11 scripts/update_alpha.py
 .\.venv\Scripts\python.exe build_editor.py
 .\dist\ImageSwitcherEditor\ImageSwitcherEditor.exe --editor-self-test
 & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer.iss
-.\dist\ImageSwitcher-Setup-0.2.0-alpha.5.exe
+.\dist\ImageSwitcher-Setup-0.2.0-alpha.6.exe
 ```
 
-The setup is unsigned and can show an unknown-publisher warning; proceed only if you trust this checkout. The Windows workflow builds the setup, installs it on its disposable runner, runs the updater against that existing install, smoke-tests the updated executable and uninstalls it. That is **not** proof of GUI functionality, camera compatibility, or clean Windows 11 installation. The app cannot be remotely installed on your personal PC from this sandbox.
+The setup is unsigned and can show an unknown-publisher warning; proceed only if you trust this checkout. Alpha.6 probes GPU readiness in the background at boot; OpenCL is bundled when the optional wheel is installed during the build, but a CPU-only or unsupported-driver PC still starts on CPU. GPU covers only eligible exposure/contrast RGB previews, **not** full-resolution exports or NEF decode. The installed app on the user's RTX 4070 still needs device-specific update/preview validation. The GPU status label reports readiness or CPU fallback. Set `IMAGE_SWITCHER_GPU=off` before launch only to troubleshoot drivers. The Windows workflow builds the setup, installs it on its disposable runner, runs the updater against that existing install, smoke-tests the updated executable and uninstalls it. That is **not** proof of GUI functionality, camera compatibility, or clean Windows 11 installation. The app cannot be remotely installed on your personal PC from this sandbox.
 
 ## Legacy converter (separate)
 

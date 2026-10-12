@@ -1,5 +1,6 @@
 """Build a standalone Windows still-photo editor PREVIEW (not a release)."""
 import argparse
+import importlib.util
 from pathlib import Path
 import PyInstaller.__main__
 
@@ -19,6 +20,11 @@ def main():
         "--hidden-import=PIL.JpegImagePlugin", "--hidden-import=PIL.WebPImagePlugin",
         "--hidden-import=src.editor.window",
     ]
+    # Optional wheel is installed best-effort by the Windows updater. Bundle
+    # its Python/OpenCL loader only when present; the GPU driver/ICD remains a
+    # device capability, never a prerequisite for launching on a CPU-only PC.
+    if importlib.util.find_spec("pyopencl") is not None:
+        options.append("--collect-all=pyopencl")
     if (root / "assets" / "icon.ico").is_file():
         options.append(f"--icon={root / 'assets' / 'icon.ico'}")
     options.append("--console" if args.console else "--windowed")

@@ -53,6 +53,8 @@ def test_gpu_opt_in_uses_preview_only_and_falls_back_on_driver_failure(tmp_path,
     cpu = process_preview(request)
 
     class FakeGPU:
+        device_name = "fake test GPU"
+
         def __init__(self):
             self.calls = 0
             self.failed = False
@@ -62,10 +64,14 @@ def test_gpu_opt_in_uses_preview_only_and_falls_back_on_driver_failure(tmp_path,
             self.calls += 1
             return Image.fromarray(cpu_pixels(np.asarray(image)))
 
-    monkeypatch.setenv("IMAGE_SWITCHER_EXPERIMENTAL_GPU_PREVIEW", "1")
+    monkeypatch.setenv("IMAGE_SWITCHER_GPU", "auto")
     monkeypatch.setattr(preview_module, "OpenCLPreview", FakeGPU)
     worker = PreviewRenderer()
     try:
+        deadline = time.monotonic() + 4
+        while worker.gpu_status == "checking" and time.monotonic() < deadline:
+            time.sleep(.005)
+        assert worker.gpu_status == "GPU ready: fake test GPU"
         worker.submit(request)
         deadline = time.monotonic() + 4
         result = None
@@ -83,6 +89,9 @@ def test_gpu_opt_in_uses_preview_only_and_falls_back_on_driver_failure(tmp_path,
     monkeypatch.setattr(preview_module, "OpenCLPreview", driver_down)
     worker = PreviewRenderer()
     try:
+        deadline = time.monotonic() + 4
+        while worker.gpu_status == "checking" and time.monotonic() < deadline:
+            time.sleep(.005)
         worker.submit(request)
         deadline = time.monotonic() + 4
         result = None
@@ -94,10 +103,15 @@ def test_gpu_opt_in_uses_preview_only_and_falls_back_on_driver_failure(tmp_path,
         assert np.array_equal(np.asarray(result[1]), np.asarray(cpu))
     finally:
         worker.close()
-    # Unsupported recipe never attempts GPU initialization.
+    # Startup initializes the GPU even if the current recipe cannot use it;
+    # an unsupported Sharpness recipe still renders on CPU.
+    monkeypatch.setattr(preview_module, "OpenCLPreview", FakeGPU)
     batch.set_batch("sharpness", .4)
     worker = PreviewRenderer()
     try:
+        deadline = time.monotonic() + 4
+        while worker.gpu_status == "checking" and time.monotonic() < deadline:
+            time.sleep(.005)
         worker.submit(PreviewRequest(2, photo, batch, False, (100, 80)))
         deadline = time.monotonic() + 4
         result = None
@@ -105,6 +119,15 @@ def test_gpu_opt_in_uses_preview_only_and_falls_back_on_driver_failure(tmp_path,
             result = worker.result()
             time.sleep(.005)
         assert result is not None and result[2] is None and result[3] is False
+        assert worker.gpu_error is None
+    finally:
+        worker.close()
+    # Explicit opt-out does not even initialize an OpenCL context.
+    monkeypatch.setenv("IMAGE_SWITCHER_GPU", "off")
+    monkeypatch.setattr(preview_module, "OpenCLPreview", driver_down)
+    worker = PreviewRenderer()
+    try:
+        assert worker.gpu_status == "CPU (GPU off)"
         assert worker.gpu_error is None
     finally:
         worker.close()

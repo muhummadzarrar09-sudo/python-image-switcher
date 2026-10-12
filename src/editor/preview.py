@@ -67,12 +67,32 @@ class PreviewRenderer:
         self._completed: Queue[tuple[int, Image.Image | None, str | None, bool]] = Queue(maxsize=1)
         self._stop = threading.Event()
         self._latest = 0
-        self._gpu_opt_in = os.environ.get("IMAGE_SWITCHER_EXPERIMENTAL_GPU_PREVIEW") == "1"
+        # Auto-probe at application boot, without waiting on the UI or preview
+        # worker. CPU-only machines work unchanged; IMAGE_SWITCHER_GPU=off is
+        # an explicit opt-out for driver troubleshooting.
+        self._gpu_auto = os.environ.get("IMAGE_SWITCHER_GPU", "auto").lower() != "off"
         self._gpu_backend: OpenCLPreview | None = None
-        self._gpu_disabled = False
+        self._gpu_disabled = not self._gpu_auto
         self.gpu_error: str | None = None
+        self.gpu_status = "checking" if self._gpu_auto else "CPU (GPU off)"
         self._worker = threading.Thread(target=self._run, name="editor-preview", daemon=True)
         self._worker.start()
+        if self._gpu_auto and self._processor is process_preview:
+            threading.Thread(target=self._prepare_gpu, name="editor-gpu-startup", daemon=True).start()
+        elif self._processor is not process_preview:
+            self.gpu_status = "CPU (custom renderer)"
+
+    def _prepare_gpu(self) -> None:
+        try:
+            backend = OpenCLPreview()
+        except Exception as exc:
+            self.gpu_error = str(exc)
+            self._gpu_disabled = True
+            self.gpu_status = "CPU fallback (GPU unavailable)"
+        else:
+            if not self._stop.is_set():
+                self._gpu_backend = backend
+                self.gpu_status = f"GPU ready: {backend.device_name}"
 
     def submit(self, request: PreviewRequest) -> None:
         if self._stop.is_set():
@@ -106,21 +126,17 @@ class PreviewRenderer:
                 continue
             try:
                 gpu_used = False
-                if (self._processor is process_preview and self._gpu_opt_in
+                backend = self._gpu_backend
+                if (self._processor is process_preview and backend is not None
                         and not self._gpu_disabled and not request.before
                         and eligible(request.photo, request.batch)):
-                    if self._gpu_backend is None:
-                        try:
-                            self._gpu_backend = OpenCLPreview()  # worker thread only
-                        except Exception as exc:
-                            self.gpu_error = str(exc)
-                            self._gpu_disabled = True
-                    previous_calls = self._gpu_backend.calls if self._gpu_backend else 0
-                    image = process_preview(request, accelerator=self._gpu_backend)
-                    gpu_used = bool(self._gpu_backend and self._gpu_backend.calls > previous_calls)
-                    if self._gpu_backend and getattr(self._gpu_backend, "failed", False):
-                        self.gpu_error = self._gpu_backend.error
+                    previous_calls = backend.calls
+                    image = process_preview(request, accelerator=backend)
+                    gpu_used = backend.calls > previous_calls
+                    if getattr(backend, "failed", False):
+                        self.gpu_error = backend.error
                         self._gpu_disabled = True
+                        self.gpu_status = "CPU fallback (GPU error)"
                 else:
                     image = self._processor(request)
                 error = None

@@ -37,6 +37,11 @@ def main() -> int:
     # Never repurpose an existing venv built against another Python version.
     run(str(python), "-c", "import sys; assert sys.version_info[:2] == (3, 11), 'The existing venv must use Python 3.11'")
     run(str(python), "-m", "pip", "install", "-r", str(ROOT / "requirements-editor.txt"), "pytest")
+    if sys.platform == "win32":
+        try:
+            run(str(python), "-m", "pip", "install", "pyopencl==2026.1.4")
+        except subprocess.CalledProcessError:
+            print("Optional GPU runtime unavailable; continuing with CPU fallback.", flush=True)
     run(str(python), "-m", "pytest", "-q", "tests/test_photo_project.py", "tests/test_editor_render.py")
     run(str(python), "src/editor_app.py", "--editor-self-test")
     print(f"Alpha dependencies installed and verified in {path}", flush=True)

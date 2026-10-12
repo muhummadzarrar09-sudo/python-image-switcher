@@ -206,7 +206,7 @@ try {
         if (-not $compiler) { throw 'Inno Setup installed, but ISCC.exe could not be located in per-user/system program folders or uninstall registration. Locate ISCC.exe and share its full path; do not reinstall Inno repeatedly.' }
     }
     Invoke-Checked $compiler @('installer.iss')
-    $setup = Join-Path $root 'dist\ImageSwitcher-Setup-0.2.0-alpha.5.exe'
+    $setup = Join-Path $root 'dist\ImageSwitcher-Setup-0.2.0-alpha.6.exe'
     if (-not (Test-Path $setup)) { throw "Alpha setup was not produced: $setup" }
     if ($installedBefore) {
         # The stable Inno AppId reuses the prior directory/uninstaller. /SILENT
@@ -220,7 +220,7 @@ try {
         }
         $smoke = Start-Process -FilePath $installedAfter -ArgumentList '--editor-self-test' -Wait -PassThru
         if ($smoke.ExitCode -ne 0) { throw "Updated editor verification failed: $($smoke.ExitCode)" }
-        Write-Host "UPDATED in place to 0.2.0-alpha.5: $installedAfter"
+        Write-Host "UPDATED in place to 0.2.0-alpha.6: $installedAfter"
         Write-Host 'Your originals, exported projects and .isbatch sessions were not touched.'
     } else {
         Write-Warning 'The alpha setup is UNSIGNED and not validated on a clean Windows 11 machine. Continue only if you trust this checkout.'

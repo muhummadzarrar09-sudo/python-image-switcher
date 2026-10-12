@@ -1,4 +1,4 @@
-"""Compare actual opt-in GPU editor preview vs CPU on generated JPG fixture.
+"""Compare automatically initialized GPU editor preview vs CPU on generated JPG fixture.
 
 Source-checkout diagnostic, not a bundled installer feature. Never reads a
 private photo or writes a master. Results are local; please share the JSON.
@@ -23,15 +23,16 @@ from src.editor.preview import PreviewRenderer, PreviewRequest  # noqa: E402
 
 
 def measure(photo, batch, *, gpu: bool, repeats: int = 5) -> dict:
-    if gpu:
-        os.environ["IMAGE_SWITCHER_EXPERIMENTAL_GPU_PREVIEW"] = "1"
-    else:
-        os.environ.pop("IMAGE_SWITCHER_EXPERIMENTAL_GPU_PREVIEW", None)
+    os.environ["IMAGE_SWITCHER_GPU"] = "auto" if gpu else "off"
     worker = PreviewRenderer()
     samples = []
     image = None
     used = False
     try:
+        if gpu:
+            deadline = perf_counter() + 30
+            while worker.gpu_status == "checking" and perf_counter() < deadline:
+                sleep(.01)
         for generation in range(1, repeats + 2):
             start = perf_counter()
             worker.submit(PreviewRequest(generation, photo, batch, False, (1200, 800)))
@@ -73,7 +74,7 @@ def main() -> None:
     for sample in (cpu, gpu):
         del sample["pixels"]
     print(json.dumps({"fixture": "checked-in AI sample enlarged to 2400x1600 JPG",
-                      "preview_size": [1200, 800], "cpu": cpu, "gpu_opt_in": gpu,
+                      "preview_size": [1200, 800], "cpu": cpu, "gpu_auto": gpu,
                       "max_channel_difference": int(diff.max()),
                       "differing_channel_count": int(np.count_nonzero(diff)),
                       "total_channels": int(diff.size),

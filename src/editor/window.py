@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from queue import Empty, Queue
+from queue import Empty, Full, Queue
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -25,7 +25,8 @@ from .version import ALPHA_VERSION
 def _thumbnail_pixels(path: str, frame_index: int) -> Image.Image:
     """Decode a tiny still in a worker; CTkImage creation stays on the UI thread."""
     background = Image.new("RGBA", (104, 61), "#343943")
-    image, _, _ = _open_source(path, preview=True, frame_index=frame_index)
+    image, _, _ = _open_source(path, preview=True, frame_index=frame_index,
+                               preview_size=(104, 61))
     if not isinstance(image, Image.Image):
         image = Image.fromarray((image / 257).astype("uint8"))
     image = image.convert("RGBA")
@@ -90,6 +91,9 @@ class ImportProgress(ctk.CTkToplevel):
         self.destroy()
 
 
+RAIL_PAGE_SIZE = 48  # bound Tk widget count, independent of batch size
+
+
 class EditorWindow(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)
@@ -104,7 +108,9 @@ class EditorWindow(ctk.CTkToplevel):
         self.import_dialog: ImportProgress | None = None
         self._import_queue: Queue | None = None
         self._import_cancel: threading.Event | None = None
+        self._import_closing = threading.Event()
         self._import_errors: list[str] = []
+        self._import_job = None
         self.brush_add = True
         self.mask_painting = False
         self.crop_window: CropTools | None = None
@@ -113,6 +119,7 @@ class EditorWindow(ctk.CTkToplevel):
         self._thumbnail_cache: dict[str, ctk.CTkImage] = {}
         self._tiles: dict[str, tuple[ctk.CTkFrame, ctk.CTkButton, ctk.CTkLabel]] = {}
         self._tile_states: dict[str, tuple[bool, bool, str]] = {}
+        self._rail_page = 0
         self.view_mode = ctk.StringVar(value="After")
         self._canvas_bounds = (0, 0, 0, 0)
         self._resize_job = None
@@ -120,6 +127,7 @@ class EditorWindow(ctk.CTkToplevel):
         self._preview_generation = 0
         self._preview_job = None
         self._preview_poll_job = None
+        self._gpu_status_job = None
         self._displayed_number: int | None = None
         self._displayed_generation = -1
         self._syncing_sliders = False
@@ -173,6 +181,20 @@ class EditorWindow(ctk.CTkToplevel):
         self.batch_count.pack(side="right")
         self.items = ctk.CTkScrollableFrame(sidebar, width=138, fg_color="transparent")
         self.items.pack(fill="both", expand=True, padx=3, pady=2)
+        rail_nav = ctk.CTkFrame(sidebar, fg_color="transparent")
+        rail_nav.pack(fill="x", padx=5, pady=(3, 1))
+        self.prev_page = ctk.CTkButton(rail_nav, text="‹", width=32, height=26,
+                                       command=lambda: self.change_rail_page(-1))
+        self.prev_page.pack(side="left")
+        self.page_label = ctk.CTkLabel(rail_nav, text="0 / 0", width=80,
+                                       text_color="#b9c3cf", font=ctk.CTkFont(size=10))
+        self.page_label.pack(side="left", expand=True)
+        self.next_page = ctk.CTkButton(rail_nav, text="›", width=32, height=26,
+                                       command=lambda: self.change_rail_page(1))
+        self.next_page.pack(side="right")
+        self.gpu_state_label = ctk.CTkLabel(sidebar, text="GPU: checking…", text_color="#aab0b9",
+                                            wraplength=150, font=ctk.CTkFont(size=10))
+        self.gpu_state_label.pack(pady=(2, 0))
         ctk.CTkLabel(sidebar, text="Protected edits stay in batch",
                      text_color="#aab0b9", wraplength=155, font=ctk.CTkFont(size=10)).pack(pady=7)
 
@@ -219,6 +241,13 @@ class EditorWindow(ctk.CTkToplevel):
         self.sync_sliders()
         self.refresh_list()
         self.show_current()
+        self._poll_gpu_status()
+
+    def _poll_gpu_status(self):
+        status = self._preview_renderer.gpu_status
+        self.gpu_state_label.configure(text=status)
+        self._gpu_status_job = self.after(250 if status == "checking" else 1500,
+                                          self._poll_gpu_status)
 
     def error(self, exc):
         messagebox.showerror("Photo editor", str(exc), parent=self)
@@ -241,7 +270,9 @@ class EditorWindow(ctk.CTkToplevel):
         self.close_background_tools()
         self.importing = True
         self._import_cancel = threading.Event()
-        self._import_queue = Queue()
+        # The worker cannot decode hundreds of photos ahead of the UI and
+        # retain all their Pillow images while the progress window catches up.
+        self._import_queue = Queue(maxsize=24)
         self._import_errors = []
         self._import_total = len(paths)
         self._import_processed = 0
@@ -249,31 +280,44 @@ class EditorWindow(ctk.CTkToplevel):
         self.import_dialog = ImportProgress(self, len(paths), self._import_cancel)
         self.status.configure(text=f"Preparing {len(paths)} selected file(s)…")
         thread = threading.Thread(target=self._import_worker,
-                                  args=(tuple(paths), self._import_queue, self._import_cancel), daemon=True)
+                                  args=(tuple(paths), self._import_queue, self._import_cancel,
+                                        self._import_closing), daemon=True)
         thread.start()
-        self.after(50, self._drain_import)
+        self._import_job = self.after(50, self._drain_import)
 
     @staticmethod
-    def _import_worker(paths, results: Queue, cancel: threading.Event):
+    def _import_worker(paths, results: Queue, cancel: threading.Event,
+                       closing: threading.Event | None = None):
+        closing = closing or threading.Event()
+
+        def send(item):
+            while not closing.is_set():
+                try:
+                    results.put(item, timeout=.1)
+                    return
+                except Full:
+                    pass  # keep only a small, bounded queue of decoded stills
+
         try:
             for path in paths:
-                if cancel.is_set():
+                if cancel.is_set() or closing.is_set():
                     break
                 try:
                     frames = []
                     for index in still_photo_frames(path):
-                        if cancel.is_set():
+                        if cancel.is_set() or closing.is_set():
                             break
                         source_info(path, frame_index=index)
                         frames.append((index, _thumbnail_pixels(path, index)))
-                    if not cancel.is_set():
-                        results.put((path, frames, None))
+                    if not cancel.is_set() and not closing.is_set():
+                        send((path, frames, None))
                 except Exception as exc:
-                    results.put((path, [], str(exc)))
+                    send((path, [], str(exc)))
         finally:
-            results.put((None, [], None))
+            send((None, [], None))
 
     def _drain_import(self):
+        self._import_job = None
         done = False
         try:
             # Bound UI-thread work per tick so progress/cancel stays responsive
@@ -298,11 +342,13 @@ class EditorWindow(ctk.CTkToplevel):
         except Empty:
             pass
         if not done:
-            self.after(50, self._drain_import)
+            self._import_job = self.after(50, self._drain_import)
             return
         canceled = self._import_cancel.is_set()
         self.import_dialog.progress_text.configure(text="Updating thumbnail rail…")
         self.import_dialog.update_idletasks()
+        if self.current is not None:
+            self._rail_page = (len(self.batch.photos) - 1) // RAIL_PAGE_SIZE
         self.refresh_list()
         self.sync_sliders()
         self.show_current()
@@ -332,14 +378,26 @@ class EditorWindow(ctk.CTkToplevel):
         return self._thumbnail_cache[photo.id]
 
     def refresh_list(self):
-        """Retain rail widgets/images when selecting or editing another photo."""
-        live = {photo.id for photo in self.batch.photos}
+        """Retain visible tiles; never create 400+ Tk widget trees at once."""
+        total = len(self.batch.photos)
+        pages = (total + RAIL_PAGE_SIZE - 1) // RAIL_PAGE_SIZE
+        self._rail_page = min(self._rail_page, max(0, pages - 1))
+        visible = self.batch.photos[self._rail_page * RAIL_PAGE_SIZE:
+                                    (self._rail_page + 1) * RAIL_PAGE_SIZE]
+        live = {photo.id for photo in visible}
         for photo_id in set(self._tiles) - live:
             self._tiles.pop(photo_id)[0].destroy()
             self._tile_states.pop(photo_id, None)
+        # Thumbnails are bounded small JPEG-derived stills, not full frames.
+        # Keep existing thumbnails across pages to avoid repeated camera decode.
+        all_ids = {photo.id for photo in self.batch.photos}
+        for photo_id in set(self._thumbnail_cache) - all_ids:
             self._thumbnail_cache.pop(photo_id, None)
-        self.batch_count.configure(text=str(len(self.batch.photos)))
-        for photo in self.batch.photos:
+        self.batch_count.configure(text=str(total))
+        self.page_label.configure(text=f"{self._rail_page + 1} / {pages}" if pages else "0 / 0")
+        self.prev_page.configure(state="normal" if self._rail_page > 0 else "disabled")
+        self.next_page.configure(state="normal" if self._rail_page + 1 < pages else "disabled")
+        for photo in visible:
             if photo.id not in self._tiles:
                 tile = ctk.CTkFrame(self.items, height=84, corner_radius=4,
                                     fg_color="#282c32")
@@ -375,10 +433,18 @@ class EditorWindow(ctk.CTkToplevel):
         else:
             self.status.configure(text="Add still photos to begin")
 
+    def change_rail_page(self, delta: int):
+        pages = (len(self.batch.photos) + RAIL_PAGE_SIZE - 1) // RAIL_PAGE_SIZE
+        self._rail_page = max(0, min(self._rail_page + delta, pages - 1))
+        self.refresh_list()
+        self.items._parent_canvas.yview_moveto(0)
+
     def select(self, number: int):
         self.close_crop_tools()
         self.close_background_tools()
         self.current = number
+        self._rail_page = next(i // RAIL_PAGE_SIZE for i, photo in enumerate(self.batch.photos)
+                               if photo.number == number)
         self.refresh_list()
         self.sync_sliders()
         self.show_current()
@@ -643,8 +709,12 @@ class EditorWindow(ctk.CTkToplevel):
     def destroy(self):
         # Workers never call Tk. Invalidate pending previews before destroying
         # the canvas so a late result cannot draw into a dead widget.
+        self._import_closing.set()
+        if self._import_cancel:
+            self._import_cancel.set()
         self._preview_renderer.close()
-        for job in (self._preview_job, self._preview_poll_job, self._resize_job):
+        for job in (self._preview_job, self._preview_poll_job, self._resize_job,
+                    self._import_job, self._gpu_status_job):
             if job is not None:
                 try:
                     self.after_cancel(job)
@@ -678,6 +748,7 @@ class EditorWindow(ctk.CTkToplevel):
                 self._thumbnail_cache.clear()
                 self.session_path = path
                 self.current = self.batch.photos[0].number if self.batch.photos else None
+                self._rail_page = 0
                 self.refresh_list()
                 self.sync_sliders()
                 self.show_current()
@@ -694,6 +765,7 @@ class EditorWindow(ctk.CTkToplevel):
                 self.close_crop_tools()
                 self.close_background_tools()
                 self.current = import_project(self.batch, path, dest).number
+                self._rail_page = (len(self.batch.photos) - 1) // RAIL_PAGE_SIZE
                 self.refresh_list()
                 self.sync_sliders()
                 self.show_current()

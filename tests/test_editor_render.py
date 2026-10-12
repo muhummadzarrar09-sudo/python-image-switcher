@@ -52,6 +52,21 @@ def test_crop_rotate_preserves_numbered_exception_and_mask(tmp_path):
     assert out.getpixel((15, 10))[1] > 10
 
 
+def test_palette_transparency_is_preserved(tmp_path):
+    palette = Image.new("P", (10, 10), 0)
+    palette.putpalette([255, 0, 0, 0, 0, 255] + [0] * (256 * 3 - 6))
+    palette.info["transparency"] = 0
+    source = tmp_path / "transparent.png"
+    palette.save(source)
+    batch = BatchSession()
+    batch.add_photo(str(source))
+    output = tmp_path / "master.png"
+    export_lossless(batch.photos[0], batch, str(output))
+    with Image.open(output) as result:
+        assert result.mode == "RGBA"
+        assert result.getpixel((0, 0))[3] == 0
+
+
 def test_background_image_must_not_be_upscaled(tmp_path):
     batch, photo, _ = sample(tmp_path)
     small = tmp_path / "bg.png"
@@ -88,6 +103,20 @@ def test_batch_exports_every_photo_and_reopens_project(tmp_path):
     assert restored.effective_settings(1)["contrast"] == .5
     assert restored.effective_settings(1)["exposure"] == 0.0
     assert render(imported, restored)[0].size == (40, 30)
+
+
+def test_project_embeds_supplied_background_for_portable_reedit(tmp_path):
+    batch, photo, _ = sample(tmp_path)
+    background = tmp_path / "replacement.png"
+    Image.new("RGB", (80, 70), (200, 20, 30)).save(background)
+    photo.background = {"mode": "image", "source": str(background)}
+    batch.add_mask_stroke(photo.number, .5, .5, .2, add_background=True)
+    projects = export_batch(batch, str(tmp_path / "output"))
+    imported = BatchSession()
+    restored = import_project(imported, projects[0][2], str(tmp_path / "imports"))
+    assert Path(restored.background["source"]).read_bytes() == background.read_bytes()
+    assert restored.mask_strokes == photo.mask_strokes
+    assert np.array_equal(np.asarray(render(restored, imported)[0]), np.asarray(render(photo, batch)[0]))
 
 
 def test_reject_16bit_source_instead_of_silent_8bit_conversion(tmp_path):

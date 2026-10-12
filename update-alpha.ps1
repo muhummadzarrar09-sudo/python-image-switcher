@@ -66,7 +66,9 @@ try {
 
     $venvPython = Join-Path $root '.venv\Scripts\python.exe'
     Invoke-Checked $venvPython @('build_editor.py')  # windowed, no console
-    Invoke-Checked (Join-Path $root 'dist\ImageSwitcherEditor\ImageSwitcherEditor.exe') @('--editor-self-test')
+    $editor = Join-Path $root 'dist\ImageSwitcherEditor\ImageSwitcherEditor.exe'
+    $smoke = Start-Process -FilePath $editor -ArgumentList '--editor-self-test' -Wait -PassThru
+    if ($smoke.ExitCode -ne 0) { throw "Packaged editor smoke test failed: $($smoke.ExitCode)" }
     $compiler = Find-InnoCompiler
     if (-not $compiler) {
         if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {

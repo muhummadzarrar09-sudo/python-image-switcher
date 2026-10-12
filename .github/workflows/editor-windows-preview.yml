@@ -26,7 +26,10 @@ jobs:
             exit 1
           }
       - name: Smoke-test packaged editor without UI
-        run: .\dist\ImageSwitcherEditor\ImageSwitcherEditor.exe --editor-self-test
+        run: |
+          $exe = Resolve-Path '.\dist\ImageSwitcherEditor\ImageSwitcherEditor.exe'
+          $process = Start-Process -FilePath $exe -ArgumentList '--editor-self-test' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Packaged editor smoke test failed: $($process.ExitCode)" }
       - name: Install Inno Setup on runner
         run: choco install innosetup --no-progress -y
       - name: Build unsigned alpha installer
@@ -43,8 +46,8 @@ jobs:
           $directory = Join-Path $env:LOCALAPPDATA 'Programs\Image Switcher'
           $editor = Join-Path $directory 'ImageSwitcherEditor.exe'
           if (-not (Test-Path $editor)) { throw "Installed editor not found: $editor" }
-          & $editor --editor-self-test
-          if ($LASTEXITCODE -ne 0) { throw "Installed editor smoke test failed: $LASTEXITCODE" }
+          $process = Start-Process -FilePath $editor -ArgumentList '--editor-self-test' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installed editor smoke test failed: $($process.ExitCode)" }
           $uninstaller = Join-Path $directory 'unins000.exe'
           if (-not (Test-Path $uninstaller)) { throw "Uninstaller not found: $uninstaller" }
           $process = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT', '/NORESTART') -Wait -PassThru

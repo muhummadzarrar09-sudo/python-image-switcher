@@ -9,26 +9,20 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
+import sys
 from time import perf_counter
 
 import numpy as np
+
+# Direct script execution places scripts/ rather than the checkout on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from src.editor.gpu_preview import KERNEL, gpu_devices  # noqa: E402
 
 # Same arithmetic/order and round-to-even as src/editor/render.py for these two
 # sliders. An isolated diagnostic is NOT sufficient to enable GPU export.
 EXPOSURE = .35
 CONTRAST = .2
-KERNEL = r"""
-__kernel void exposure_contrast(__global const uchar *source,
-                                __global uchar *output, const float exposure,
-                                const float contrast, const int n) {
-    int i = get_global_id(0);
-    if (i >= n) return;
-    float value = (float)source[i] / 255.0f;
-    value *= exposure;
-    value = (value - 0.5f) * contrast + 0.5f;
-    output[i] = convert_uchar_sat_rte(clamp(value, 0.0f, 1.0f) * 255.0f);
-}
-"""
 
 
 def cpu_pixels(source: np.ndarray) -> np.ndarray:
@@ -49,19 +43,6 @@ def fixture(width: int, height: int) -> np.ndarray:
                      (x * 7 + y * 11) % 256), axis=-1).astype(np.uint8)
 
 
-def gpu_devices(cl):
-    """GPU only; a software OpenCL CPU device must never be called accelerated."""
-    found = []
-    for platform in cl.get_platforms():
-        try:
-            found.extend(platform.get_devices(device_type=cl.device_type.GPU))
-        except cl.LogicError as exc:
-            if exc.code != cl.status_code.DEVICE_NOT_FOUND:
-                raise
-            # A CPU-only ICD must not hide a GPU on another platform.
-    return found
-
-
 def probe(width: int, height: int, repeats: int = 5) -> dict:
     import pyopencl as cl  # optional; do not load it in the app or installer
 
@@ -74,6 +55,7 @@ def probe(width: int, height: int, repeats: int = 5) -> dict:
     context = cl.Context(devices=[device])
     queue = cl.CommandQueue(context, properties=cl.command_queue_properties.PROFILING_ENABLE)
     program = cl.Program(context, KERNEL).build()
+    kernel = cl.Kernel(program, "exposure_contrast")
     source = fixture(width, height)
     flat = np.ascontiguousarray(source.reshape(-1))
     cpu_samples = []
@@ -89,9 +71,9 @@ def probe(width: int, height: int, repeats: int = 5) -> dict:
     for index in range(repeats + 1):
         start = perf_counter()
         cl.enqueue_copy(queue, input_buffer, flat, is_blocking=False)
-        event = program.exposure_contrast(queue, (flat.size,), None, input_buffer, output_buffer,
-                                           np.float32(2 ** EXPOSURE), np.float32(1 + CONTRAST),
-                                           np.int32(flat.size))
+        event = kernel(queue, (flat.size,), None, input_buffer, output_buffer,
+                       np.float32(2 ** EXPOSURE), np.float32(1 + CONTRAST),
+                       np.int32(flat.size))
         cl.enqueue_copy(queue, output, output_buffer, is_blocking=True)
         elapsed = perf_counter() - start  # includes device transfer and sync
         if index:  # first run is warmup, including driver initialization

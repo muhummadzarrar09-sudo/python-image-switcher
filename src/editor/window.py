@@ -608,7 +608,7 @@ class EditorWindow(ctk.CTkToplevel):
         if result is None or result[0] != self._preview_generation:
             self._preview_poll_job = self.after(40, self._poll_preview)
             return
-        _, image, error = result
+        _, image, error, gpu_used = result
         if error:
             self._show_preview_error(error)
             return
@@ -627,6 +627,8 @@ class EditorWindow(ctk.CTkToplevel):
             self._displayed_generation = self._preview_generation
             state = "Protected" if photo.protected else "Batch"
             kind = "Source preview" if self.view_mode.get() == "Before" else "Edited preview"
+            if gpu_used:
+                kind += " · experimental GPU"
             self.status.configure(text=f"#{photo.number:04d} · {state} · {kind} · {Path(photo.source).name[:28]}")
         except Exception as exc:
             self._show_preview_error(str(exc))

@@ -9,6 +9,7 @@ from PIL import Image
 
 from src.editor.batch import BatchSession
 from src.editor.preview import PreviewRenderer, PreviewRequest, process_preview
+from scripts.probe_gpu import cpu_pixels
 from src.editor.render import render
 
 
@@ -37,6 +38,78 @@ def test_multi_picture_jpg_second_still_preview_is_not_first(tmp_path):
         image = process_preview(PreviewRequest(1, photo, batch, before, (240, 160)))
         assert image.getpixel((image.width//2, image.height//2))[2] > 240
         assert image.width <= 240 and image.height <= 160
+
+
+def test_gpu_opt_in_uses_preview_only_and_falls_back_on_driver_failure(tmp_path, monkeypatch):
+    from src.editor import preview as preview_module
+
+    source = tmp_path / "color.png"
+    Image.new("RGB", (160, 120), (105, 75, 55)).save(source)
+    batch = BatchSession()
+    photo = batch.add_photo(str(source))
+    batch.set_batch("exposure", .35)
+    batch.set_batch("contrast", .2)
+    request = PreviewRequest(1, photo, batch, False, (100, 80))
+    cpu = process_preview(request)
+
+    class FakeGPU:
+        def __init__(self):
+            self.calls = 0
+            self.failed = False
+
+        def apply(self, image, exposure, contrast):
+            assert (exposure, contrast) == (.35, .2)
+            self.calls += 1
+            return Image.fromarray(cpu_pixels(np.asarray(image)))
+
+    monkeypatch.setenv("IMAGE_SWITCHER_EXPERIMENTAL_GPU_PREVIEW", "1")
+    monkeypatch.setattr(preview_module, "OpenCLPreview", FakeGPU)
+    worker = PreviewRenderer()
+    try:
+        worker.submit(request)
+        deadline = time.monotonic() + 4
+        result = None
+        while result is None and time.monotonic() < deadline:
+            result = worker.result()
+            time.sleep(.005)
+        assert result is not None and result[2] is None and result[3] is True
+        assert np.array_equal(np.asarray(result[1]), np.asarray(cpu))
+    finally:
+        worker.close()
+
+    def driver_down():
+        raise RuntimeError("driver unavailable")
+
+    monkeypatch.setattr(preview_module, "OpenCLPreview", driver_down)
+    worker = PreviewRenderer()
+    try:
+        worker.submit(request)
+        deadline = time.monotonic() + 4
+        result = None
+        while result is None and time.monotonic() < deadline:
+            result = worker.result()
+            time.sleep(.005)
+        assert result is not None and result[2] is None and result[3] is False
+        assert worker.gpu_error == "driver unavailable"
+        assert np.array_equal(np.asarray(result[1]), np.asarray(cpu))
+    finally:
+        worker.close()
+    # Unsupported recipe never attempts GPU initialization.
+    batch.set_batch("sharpness", .4)
+    worker = PreviewRenderer()
+    try:
+        worker.submit(PreviewRequest(2, photo, batch, False, (100, 80)))
+        deadline = time.monotonic() + 4
+        result = None
+        while result is None and time.monotonic() < deadline:
+            result = worker.result()
+            time.sleep(.005)
+        assert result is not None and result[2] is None and result[3] is False
+        assert worker.gpu_error is None
+    finally:
+        worker.close()
+    # No preview-only optimization may change the full-resolution export path.
+    assert render(photo, batch)[0].size == (160, 120)
 
 
 def test_only_latest_request_survives_slow_worker(tmp_path):

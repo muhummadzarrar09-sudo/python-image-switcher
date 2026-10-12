@@ -46,6 +46,11 @@ jobs:
             Write-Host "::error file=scripts/capture_editor_baseline.py,line=1::$tail"
             exit 1
           }
+      - name: Profile generated 421-photo import and peak RAM (diagnostic)
+        shell: pwsh
+        run: |
+          & .\.venv\Scripts\python.exe scripts\benchmark_large_batch.py --count 421 | Tee-Object -FilePath ui-captures\runner\large-batch.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

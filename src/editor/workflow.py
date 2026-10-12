@@ -85,13 +85,19 @@ def import_project(batch: BatchSession, path: str, directory: str) -> Photo:
         original = project.copy_original(os.path.join(target, "original"))
         background = project.copy_background(os.path.join(target, "background"))
         project.copy_master(os.path.join(target, "master"))
-        photo = batch.add_photo(original)
+        recipe = project.manifest.get("edits", {})
+        saved = recipe.get("photo", {})
+        frame_index = saved.get("frame_index", 0)
+        if type(frame_index) is not int or frame_index < 0:
+            raise ValueError("Invalid saved still-photo frame index")
+        # Validate the indexed original before adding it to the session.
+        from .render import source_info
+        source_info(original, frame_index=frame_index)
+        photo = batch.add_photo(original, frame_index=frame_index)
         old_number = project.photo_number
         if old_number not in {p.number for p in batch.photos if p is not photo}:
             photo.number = old_number
             batch.next_number = max(batch.next_number, old_number + 1)
-        recipe = project.manifest.get("edits", {})
-        saved = recipe.get("photo", {})
         for key in ("overrides", "frozen_batch", "crop", "rotation", "flip_horizontal", "mask_strokes", "background"):
             if key in saved:
                 setattr(photo, key, tuple(saved[key]) if key == "crop" and saved[key] else saved[key])

@@ -17,7 +17,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageOps, ImageCms
 
 from .batch import BatchSession, Photo
 
-STILL_EXTENSIONS = {".nef", ".jpg", ".jpeg", ".png", ".tif", ".tiff",
+STILL_EXTENSIONS = {".nef", ".jpg", ".jpeg", ".mpo", ".png", ".tif", ".tiff",
                     ".webp", ".bmp", ".avif", ".heic", ".heif"}
 MAX_RENDER_PIXELS = 100_000_000  # bounded resource use, not a silent resize
 
@@ -46,11 +46,60 @@ def _check_depth(path: str, image: Image.Image) -> None:
             raise PhotoRenderError("16-bit TIFF editing is not supported without precision loss")
 
 
-def _open_source(path: str, *, preview: bool = False) -> tuple[Image.Image | np.ndarray, bytes | None, bool]:
+def _choose_still(image: Image.Image, ext: str, frame_index: int | None) -> None:
+    """MPOs are collections of JPEG *stills*, not an animation to truncate.
+
+    Require an explicit index for MPO so callers such as background replacement
+    cannot silently use only its primary still. Everything else remains strictly
+    single-frame (no GIF/WebP animation or first-page TIFF fallback).
+    """
+    frames = getattr(image, "n_frames", 1)
+    if image.format == "MPO" and ext in (".jpg", ".jpeg", ".mpo"):
+        if type(frames) is not int or frames < 1:
+            raise PhotoRenderError("Invalid multi-picture JPEG")
+        if frame_index is None:
+            if frames > 1:
+                raise PhotoRenderError("Multi-picture JPEG contains several stills; add it to the batch to keep every photo")
+            frame_index = 0
+        if type(frame_index) is not int or not 0 <= frame_index < frames:
+            raise PhotoRenderError("Invalid multi-picture JPEG still index")
+        image.seek(frame_index)
+    elif getattr(image, "is_animated", False) or frames != 1:
+        raise PhotoRenderError("Animated/multipage files are outside the still-photo editor")
+    elif frame_index not in (None, 0) or isinstance(frame_index, bool):
+        raise PhotoRenderError("Single still photo has no other frame")
+
+
+def still_photo_frames(path: str) -> range:
+    """Identify each importable JPEG still without guessing a primary frame."""
+    ext = Path(path).suffix.lower()
+    if ext not in STILL_EXTENSIONS:
+        raise PhotoRenderError("Unsupported still-photo extension")
+    if ext == ".nef":
+        return range(1)
+    try:
+        with Image.open(path) as image:
+            if image.format == "MPO" and ext in (".jpg", ".jpeg", ".mpo"):
+                frames = getattr(image, "n_frames", 0)
+                if type(frames) is not int or frames < 1:
+                    raise PhotoRenderError("Invalid multi-picture JPEG")
+                return range(frames)
+            _choose_still(image, ext, None)
+            return range(1)
+    except PhotoRenderError:
+        raise
+    except Exception as exc:
+        raise PhotoRenderError(f"Cannot read still photo: {exc}") from exc
+
+
+def _open_source(path: str, *, preview: bool = False,
+                 frame_index: int | None = None) -> tuple[Image.Image | np.ndarray, bytes | None, bool]:
     ext = Path(path).suffix.lower()
     if ext not in STILL_EXTENSIONS:
         raise PhotoRenderError(f"{ext or 'Unknown file'} is not a supported still-photo extension")
     if ext == ".nef":
+        if frame_index not in (None, 0) or isinstance(frame_index, bool):
+            raise PhotoRenderError("NEF contains one editable still")
         try:
             import rawpy
         except ImportError as exc:
@@ -73,8 +122,7 @@ def _open_source(path: str, *, preview: bool = False) -> tuple[Image.Image | np.
             raise PhotoRenderError(f"Cannot decode this NEF camera/compression: {exc}") from exc
     try:
         with Image.open(path) as image:
-            if getattr(image, "is_animated", False) or getattr(image, "n_frames", 1) != 1:
-                raise PhotoRenderError("Animated/multipage files are outside the still-photo editor")
+            _choose_still(image, ext, frame_index)
             if image.width * image.height > MAX_RENDER_PIXELS:
                 raise PhotoRenderError("Photo exceeds the current safe processing size")
             _check_depth(path, image)
@@ -90,20 +138,19 @@ def _open_source(path: str, *, preview: bool = False) -> tuple[Image.Image | np.
         raise PhotoRenderError(f"Cannot read still photo: {exc}") from exc
 
 
-def source_info(path: str) -> dict:
+def source_info(path: str, *, frame_index: int | None = None) -> dict:
     """Validate still-photo intake and report source dimensions, not thumbnail size."""
     ext = Path(path).suffix.lower()
     if ext not in STILL_EXTENSIONS:
         raise PhotoRenderError("Unsupported still-photo extension")
     if ext == ".nef":
-        _open_source(path, preview=True)  # validate that LibRaw can open/preview it
+        _open_source(path, preview=True, frame_index=frame_index)  # validate LibRaw
         import rawpy
         with rawpy.imread(path) as raw:
             return {"size": (raw.sizes.width, raw.sizes.height), "raw": True}
     try:
         with Image.open(path) as image:
-            if getattr(image, "is_animated", False) or getattr(image, "n_frames", 1) != 1:
-                raise PhotoRenderError("Animated/multipage files are outside the still-photo editor")
+            _choose_still(image, ext, frame_index)
             if image.width * image.height > MAX_RENDER_PIXELS:
                 raise PhotoRenderError("Photo exceeds the current safe processing size")
             _check_depth(path, image)
@@ -133,7 +180,7 @@ def render(photo: Photo, batch: BatchSession, *, preview: bool = False) -> tuple
     Return (image, source ICC, 16-bit RAW). Non-RAW outputs are Pillow images;
     16-bit NEF outputs are RGB uint16 ndarrays (never coerced to 8 bits).
     """
-    image, profile, raw = _open_source(photo.source, preview=preview)
+    image, profile, raw = _open_source(photo.source, preview=preview, frame_index=photo.frame_index)
     values = batch.effective_settings(photo.number)
     if raw:
         pixels = image

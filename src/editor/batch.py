@@ -70,6 +70,7 @@ class Photo:
     background: dict = field(default_factory=dict)
     mask_strokes: list[dict] = field(default_factory=list)
     rights: dict = field(default_factory=dict)
+    frame_index: int = 0  # MPO JPEG still number; 0 for ordinary single-photo files
 
 
 @dataclass
@@ -80,11 +81,13 @@ class BatchSession:
     rights: dict = field(default_factory=dict)
     version: int = 1
 
-    def add_photo(self, path: str) -> Photo:
+    def add_photo(self, path: str, *, frame_index: int = 0) -> Photo:
         path = str(Path(path).expanduser().resolve())
         if not os.path.isfile(path):
             raise FileNotFoundError(path)
-        photo = Photo(number=self.next_number, source=path)
+        if type(frame_index) is not int or frame_index < 0:
+            raise ValueError("Invalid still-photo frame index")
+        photo = Photo(number=self.next_number, source=path, frame_index=frame_index)
         self.photos.append(photo)
         self.next_number += 1
         return photo
@@ -170,6 +173,8 @@ class BatchSession:
             raise ValueError("Invalid next photo number")
         settings = {key: _check_setting(key, val) for key, val in data["batch_settings"].items()}
         for photo in photos:
+            if type(photo.frame_index) is not int or photo.frame_index < 0:
+                raise ValueError("Invalid still-photo frame index")
             for mapping in (photo.frozen_batch, photo.overrides):
                 for key, val in mapping.items():
                     _check_setting(key, val)

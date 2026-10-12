@@ -1,6 +1,6 @@
 # 🖼️ Python Image Switcher - Universal Image Converter
 
-> **Still-photo editor alpha 0.2.0-alpha.3:** numbered batch editing, protected hand edits,
+> **Still-photo editor alpha 0.2.0-alpha.4:** numbered batch editing, protected hand edits, camera MPO-in-JPG stills and import progress,
 > lossless PNG/TIFF masters and portable `.isphoto` copies are under development.
 > See [EDITOR_STATUS.md](EDITOR_STATUS.md) for exact capabilities, missing signed
 > credentials/ownership features, Windows 11 release gates, and the [Windows alpha updater](BUILD.md). The converter

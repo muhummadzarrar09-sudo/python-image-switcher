@@ -7,7 +7,7 @@ import tifffile
 
 from src.editor.batch import BatchSession
 from src.editor.project import read_project
-from src.editor.render import PhotoRenderError, export_lossless, render, source_info
+from src.editor.render import PhotoRenderError, export_lossless, render, source_info, still_photo_frames
 from src.editor.workflow import export_batch, import_project
 
 
@@ -154,6 +154,46 @@ def test_reject_multiframe_instead_of_first_frame(tmp_path):
     frames[0].save(path, save_all=True, append_images=frames[1:], duration=100, loop=0)
     with pytest.raises(PhotoRenderError, match="Animated/multipage"):
         source_info(str(path))
+
+
+def test_camera_multipicture_jpg_imports_every_still_with_original_and_reopen(tmp_path):
+    """Pillow reports MPO-in-.JPG as animated, but these are separate still photos."""
+    path = tmp_path / "CSC0108.JPG"
+    first = Image.new("RGB", (32, 24), "red")
+    second = Image.new("RGB", (32, 24), "blue")
+    first.save(path, format="MPO", save_all=True, append_images=[second])
+    original_bytes = path.read_bytes()
+    with Image.open(path) as probed:
+        assert probed.format == "MPO" and probed.n_frames == 2 and probed.is_animated
+    assert list(still_photo_frames(str(path))) == [0, 1]
+    with pytest.raises(PhotoRenderError, match="several stills"):
+        source_info(str(path))  # never silently take the primary frame
+    session = BatchSession()
+    photos = []
+    for frame in still_photo_frames(str(path)):
+        assert source_info(str(path), frame_index=frame)["size"] == (32, 24)
+        photos.append(session.add_photo(str(path), frame_index=frame))
+    assert [p.number for p in photos] == [1, 2]
+    assert render(photos[0], session)[0].getpixel((0, 0))[0] > 240
+    assert render(photos[1], session)[0].getpixel((0, 0))[2] > 240
+    session_path = tmp_path / "session.isbatch"
+    session.save(str(session_path))
+    restored = BatchSession.load(str(session_path))
+    assert [p.frame_index for p in restored.photos] == [0, 1]
+    results = export_batch(restored, str(tmp_path / "export"))
+    assert len(results) == 2
+    for frame, (_, master, project) in enumerate(results):
+        with Image.open(master) as image:
+            assert image.getpixel((0, 0))[0 if frame == 0 else 2] > 240
+        assert read_project(project).manifest["edits"]["photo"]["frame_index"] == frame
+        assert read_project(project).copy_original(str(tmp_path / f"original-{frame}"))
+        assert (tmp_path / f"original-{frame}" / path.name).read_bytes() == original_bytes
+    reopened = BatchSession()
+    imported = import_project(reopened, results[1][2], str(tmp_path / "reopened"))
+    assert imported.frame_index == 1
+    assert render(imported, reopened)[0].getpixel((0, 0))[2] > 240
+    with pytest.raises(PhotoRenderError, match="index"):
+        source_info(str(path), frame_index=3)
 
 
 def test_nef_16bit_tiff_export_path_without_camera_fixture(tmp_path, monkeypatch):

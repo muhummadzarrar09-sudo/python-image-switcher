@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+from queue import Empty, Queue
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -15,9 +16,77 @@ import customtkinter as ctk
 from PIL import Image, ImageColor, ImageTk
 
 from .batch import BatchSession, EDIT_FIELDS
-from .render import STILL_EXTENSIONS, render, source_info, _open_source
+from .render import STILL_EXTENSIONS, render, source_info, still_photo_frames, _open_source
 from .workflow import export_batch, import_project
 from .version import ALPHA_VERSION
+
+
+def _thumbnail_pixels(path: str, frame_index: int) -> Image.Image:
+    """Decode a tiny still in a worker; CTkImage creation stays on the UI thread."""
+    background = Image.new("RGBA", (104, 61), "#343943")
+    image, _, _ = _open_source(path, preview=True, frame_index=frame_index)
+    if not isinstance(image, Image.Image):
+        image = Image.fromarray((image / 257).astype("uint8"))
+    image = image.convert("RGBA")
+    image.thumbnail((104, 61), Image.Resampling.LANCZOS)
+    background.alpha_composite(image, ((104-image.width)//2, (61-image.height)//2))
+    return background.convert("RGB")
+
+
+class ImportProgress(ctk.CTkToplevel):
+    """Progress for background intake. Cancel stops after the current file."""
+
+    def __init__(self, editor, total: int, cancel: threading.Event):
+        super().__init__(editor)
+        self.title("Adding still photos")
+        self.geometry("430x190")
+        self.resizable(False, False)
+        self.transient(editor)
+        self.configure(fg_color="#25282d")
+        self._cancel = cancel
+        self.editor_total = total
+        self.protocol("WM_DELETE_WINDOW", self.request_cancel)
+        x = editor.winfo_rootx() + max(0, (editor.winfo_width() - 430)//2)
+        y = editor.winfo_rooty() + max(0, (editor.winfo_height() - 190)//2)
+        self.geometry(f"430x190+{x}+{y}")
+        ctk.CTkLabel(self, text="Adding still photos", anchor="w",
+                     font=ctk.CTkFont(size=18, weight="bold")).pack(fill="x", padx=22, pady=(16, 5))
+        self.progress_text = ctk.CTkLabel(self, text=f"Checking 0 of {total} files…",
+                                          anchor="w", text_color="#c8d0dc")
+        self.progress_text.pack(fill="x", padx=22)
+        self.bar = ctk.CTkProgressBar(self, width=382, height=10)
+        self.bar.pack(padx=22, pady=(12, 6))
+        self.bar.set(0)
+        self.filename = ctk.CTkLabel(self, text="Checking image data…", anchor="w",
+                                      text_color="#9da8b6", font=ctk.CTkFont(size=11))
+        self.filename.pack(fill="x", padx=22)
+        self.cancel_button = ctk.CTkButton(self, text="Stop importing", width=110,
+                                            fg_color="#3c444e", command=self.request_cancel)
+        self.cancel_button.pack(anchor="e", padx=22, pady=(3, 10))
+        self.after_idle(self._focus)
+
+    def _focus(self):
+        if self.winfo_exists():
+            try:
+                self.lift()
+                self.grab_set()
+            except tk.TclError:
+                self.after(50, self._focus)  # allow the native window to become viewable
+
+    def show_progress(self, processed: int, added: int, name: str):
+        self.progress_text.configure(text=f"Checked {processed}/{self.editor_total} files · {added} photo(s) added")
+        self.filename.configure(text=name[:55])
+        self.bar.set(processed / self.editor_total)
+
+    def request_cancel(self):
+        self._cancel.set()
+        self.progress_text.configure(text="Stopping after the current file…")
+        self.cancel_button.configure(state="disabled")
+
+    def close(self):
+        if self.grab_current() == self:
+            self.grab_release()
+        self.destroy()
 
 
 class EditorWindow(ctk.CTkToplevel):
@@ -30,6 +99,11 @@ class EditorWindow(ctk.CTkToplevel):
         self.session_path: str | None = None
         self.current: int | None = None
         self.busy = False
+        self.importing = False
+        self.import_dialog: ImportProgress | None = None
+        self._import_queue: Queue | None = None
+        self._import_cancel: threading.Event | None = None
+        self._import_errors: list[str] = []
         self.brush_add = True
         self.mask_painting = False
         self.crop_window: CropTools | None = None
@@ -142,40 +216,108 @@ class EditorWindow(ctk.CTkToplevel):
         self.status.configure(text=str(exc)[:100])
 
     def add_files(self):
+        if self.importing or self.busy:
+            return
         paths = filedialog.askopenfilenames(parent=self, title="Choose still photos",
                                            filetypes=[("Still photos", " ".join("*" + ext for ext in sorted(STILL_EXTENSIONS))),
                                                       ("All files", "*.*")])
-        errors = []
-        for path in paths:
-            try:
-                source_info(path)
-                self.current = self.batch.add_photo(path).number
-            except Exception as exc:
-                errors.append(f"{Path(path).name}: {exc}")
         if paths:
-            self.close_crop_tools()
-            self.close_background_tools()
-            self.refresh_list()
-            self.sync_sliders()
-            self.show_current()
-        if errors:
-            self.error("\n".join(errors[:8]))
+            self.start_import(paths)
+
+    def start_import(self, paths):
+        """Validate/decode off the UI thread; add numbered photos on Tk's thread."""
+        if self.importing or self.busy or not paths:
+            return
+        self.close_crop_tools()
+        self.close_background_tools()
+        self.importing = True
+        self._import_cancel = threading.Event()
+        self._import_queue = Queue()
+        self._import_errors = []
+        self._import_total = len(paths)
+        self._import_processed = 0
+        self._import_added = 0
+        self.import_dialog = ImportProgress(self, len(paths), self._import_cancel)
+        self.status.configure(text=f"Preparing {len(paths)} selected file(s)…")
+        thread = threading.Thread(target=self._import_worker,
+                                  args=(tuple(paths), self._import_queue, self._import_cancel), daemon=True)
+        thread.start()
+        self.after(50, self._drain_import)
+
+    @staticmethod
+    def _import_worker(paths, results: Queue, cancel: threading.Event):
+        try:
+            for path in paths:
+                if cancel.is_set():
+                    break
+                try:
+                    frames = []
+                    for index in still_photo_frames(path):
+                        if cancel.is_set():
+                            break
+                        source_info(path, frame_index=index)
+                        frames.append((index, _thumbnail_pixels(path, index)))
+                    if not cancel.is_set():
+                        results.put((path, frames, None))
+                except Exception as exc:
+                    results.put((path, [], str(exc)))
+        finally:
+            results.put((None, [], None))
+
+    def _drain_import(self):
+        done = False
+        try:
+            # Bound UI-thread work per tick so progress/cancel stays responsive
+            # even when a fast validation thread queues hundreds of files.
+            for _ in range(12):
+                path, frames, error = self._import_queue.get_nowait()
+                if path is None:
+                    done = True
+                    break
+                self._import_processed += 1
+                if error:
+                    self._import_errors.append(f"{Path(path).name}: {error}")
+                else:
+                    for index, image in frames:
+                        photo = self.batch.add_photo(path, frame_index=index)
+                        self._thumbnail_cache[photo.id] = ctk.CTkImage(
+                            light_image=image, dark_image=image, size=(104, 61))
+                        self.current = photo.number
+                        self._import_added += 1
+                self.import_dialog.show_progress(self._import_processed, self._import_added,
+                                                  Path(path).name)
+        except Empty:
+            pass
+        if not done:
+            self.after(50, self._drain_import)
+            return
+        canceled = self._import_cancel.is_set()
+        self.import_dialog.progress_text.configure(text="Updating thumbnail rail…")
+        self.import_dialog.update_idletasks()
+        self.refresh_list()
+        self.sync_sliders()
+        self.show_current()
+        self.importing = False
+        self.import_dialog.close()
+        self.import_dialog = None
+        self.status.configure(text=(f"{'Stopped' if canceled else 'Finished'}: "
+                                    f"{self._import_added} photo(s) added from "
+                                    f"{self._import_processed}/{self._import_total} file(s); "
+                                    f"{len(self._import_errors)} failed"))
+        if self._import_errors:
+            first = "\n".join(self._import_errors[:3])
+            extra = f"\n…and {len(self._import_errors)-3} more." if len(self._import_errors) > 3 else ""
+            messagebox.showwarning("Some still photos were not added",
+                                   f"{len(self._import_errors)} file(s) could not be read.\n\n"
+                                   f"{first}{extra}\n\nSuccessfully added photos remain in the batch.", parent=self)
 
     def thumbnail(self, photo):
         """Cache a small original preview; never re-render full-resolution photos for the rail."""
         if photo.id not in self._thumbnail_cache:
-            background = Image.new("RGBA", (104, 61), "#343943")
             try:
-                image, _, _ = _open_source(photo.source, preview=True)
-                if not isinstance(image, Image.Image):
-                    image = Image.fromarray((image / 257).astype("uint8"))
-                image = image.convert("RGBA")
-                image.thumbnail((104, 61), Image.Resampling.LANCZOS)
-                x, y = (104-image.width)//2, (61-image.height)//2
-                background.alpha_composite(image, (x, y))
+                rgb = _thumbnail_pixels(photo.source, photo.frame_index)
             except Exception:
-                pass  # missing source is still visibly numbered; export reports the error
-            rgb = background.convert("RGB")
+                rgb = Image.new("RGB", (104, 61), "#343943")
             self._thumbnail_cache[photo.id] = ctk.CTkImage(light_image=rgb, dark_image=rgb,
                                                             size=(104, 61))
         return self._thumbnail_cache[photo.id]
@@ -392,7 +534,7 @@ class EditorWindow(ctk.CTkToplevel):
             photo = self.selected_photo()
             before = self.view_mode.get() == "Before"
             if before:
-                image, _, _ = _open_source(photo.source, preview=True)
+                image, _, _ = _open_source(photo.source, preview=True, frame_index=photo.frame_index)
             else:
                 image, _, _ = render(photo, self.batch, preview=True)
             if not isinstance(image, Image.Image):
@@ -455,7 +597,7 @@ class EditorWindow(ctk.CTkToplevel):
                 self.error(exc)
 
     def export(self):
-        if self.busy:
+        if self.busy or self.importing:
             return
         if not self.batch.photos:
             self.error("Add still photos before exporting")

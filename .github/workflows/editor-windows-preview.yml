@@ -14,6 +14,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Regression-test missing Python runtime detection
+        shell: powershell
+        run: .\update-alpha.ps1 -ProbeTest
       - name: Install alpha dependencies and verify via updater
         shell: powershell
         run: .\update-alpha.ps1 -DependenciesOnly

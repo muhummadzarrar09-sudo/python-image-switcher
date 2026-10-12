@@ -2,7 +2,7 @@
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\update-alpha.ps1
 # Creates .venv, installs Python dependencies, tests, builds and launches
 # the unsigned alpha installer. It never rewrites source photos or Git branches.
-param([switch]$DependenciesOnly)
+param([switch]$DependenciesOnly, [switch]$ProbeTest)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
@@ -12,23 +12,35 @@ function Invoke-Checked($command, [string[]]$arguments) {
     if ($LASTEXITCODE -ne 0) { throw "$command failed with exit code $LASTEXITCODE" }
 }
 
+function Test-Python311($command, [string[]]$prefix) {
+    # Windows PowerShell 5.1 treats native stderr as a terminating error when
+    # ErrorActionPreference=Stop, even for a harmless failed version probe.
+    # Missing runtimes must return false, not abort the whole updater.
+    $oldPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $command @prefix -c 'import sys; sys.exit(0 if sys.version_info[:2] == (3,11) else 1)' 2>$null | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    } finally {
+        $ErrorActionPreference = $oldPreference
+    }
+}
+
 function Find-Python311 {
     $plain = Get-Command python -ErrorAction SilentlyContinue
-    if ($plain) {
-        & $plain.Source -c 'import sys; sys.exit(0 if sys.version_info[:2] == (3,11) else 1)' 2>$null
-        if ($LASTEXITCODE -eq 0) { return @($plain.Source) }
-    }
+    if ($plain -and (Test-Python311 -command $plain.Source -prefix @())) { return @($plain.Source) }
     $launcher = Get-Command py -ErrorAction SilentlyContinue
-    if ($launcher) {
-        & $launcher.Source -3.11 -c 'import sys; sys.exit(0 if sys.version_info[:2] == (3,11) else 1)' 2>$null
-        if ($LASTEXITCODE -eq 0) { return @($launcher.Source, '-3.11') }
+    if ($launcher -and (Test-Python311 -command $launcher.Source -prefix @('-3.11'))) {
+        return @($launcher.Source, '-3.11')
     }
     $paths = @(
         (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python311\python.exe'),
         (Join-Path $env:ProgramFiles 'Python311\python.exe')
     )
     foreach ($candidate in $paths) {
-        if (Test-Path $candidate) { return @($candidate) }
+        if ((Test-Path $candidate) -and (Test-Python311 -command $candidate -prefix @())) { return @($candidate) }
     }
     return @()
 }
@@ -44,12 +56,38 @@ function Find-InnoCompiler {
     return $null
 }
 
+if ($ProbeTest) {
+    # CI regression: a launcher writing to stderr and exiting nonzero must be
+    # treated as unavailable, not terminate the updater's version search.
+    $available = Get-Command python -ErrorAction Stop
+    $errorCode = 'import sys; sys.stderr.write("No matching runtime\\n"); sys.exit(103)'
+    if (Test-Python311 -command $available.Source -prefix @('-c', $errorCode)) {
+        throw 'Probe incorrectly accepted a missing runtime'
+    }
+    Write-Host 'Missing-runtime probe handled safely.'
+    return
+}
+
 Push-Location $root
 try {
     $python = @(Find-Python311)
     if ($python.Count -eq 0) {
+        $launcher = Get-Command py -ErrorAction SilentlyContinue
+        if ($launcher) {
+            # The newer Python install manager recommends exactly this command
+            # when `py -3.11` has no runtime. Legacy launchers may reject it.
+            try {
+                Write-Host 'Installing Python 3.11 via the Python launcher...'
+                Invoke-Checked $launcher.Source @('install', '3.11')
+            } catch {
+                Write-Warning "Python launcher install was unavailable: $($_.Exception.Message)"
+            }
+            $python = @(Find-Python311)
+        }
+    }
+    if ($python.Count -eq 0) {
         if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-            throw 'Python 3.11 is missing. Install it from the official Python installer, reopen PowerShell, then rerun. winget is unavailable.'
+            throw 'Python 3.11 is missing. Run py install 3.11 or install Python 3.11 from python.org, reopen PowerShell, then rerun. winget is unavailable.'
         }
         Write-Host 'Installing Python 3.11 for this Windows user via winget...'
         Invoke-Checked 'winget' @('install', '-e', '--id', 'Python.Python.3.11', '--scope', 'user', '--silent', '--accept-package-agreements', '--accept-source-agreements')

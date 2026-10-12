@@ -19,10 +19,15 @@ This creates a temporary 3.84 MP JPG from the checked-in AI test image. Separate
 
 A CUDA/OpenCL/DirectML toggle with no measured accelerated operation would be deceptive. LibRaw decode, Pillow resize/codec, Tk canvas and PNG/TIFF writing are currently CPU-bound. GPU memory transfers/driver setup can *slow down* a small preview. MUH-56 tracks a **separate optional GPU backend** only after profiling real Windows hardware and testing 8-bit/16-bit output parity, VRAM limits, cancellation and a CPU-only fallback. It is not a hard runtime dependency; alpha.5 ships CPU optimizations, **not GPU acceleration**.
 
-To share non-sensitive hardware information without any photo, run from this checkout on Windows:
+The user has now reported **15.7 GiB system RAM**, Intel Iris Xe (Windows-reported driver `32.0.101.6790`) and NVIDIA RTX 4070 Laptop GPU (`32.0.16.1692`), and says the editor works on their Windows 11 machine. `Win32_VideoController.AdapterRAM` reported 2/4 GiB, but this value can wrap or be wrong and **is not a VRAM capacity measurement**. A Windows runner cannot emulate this laptop's drivers or thermal/power behavior.
+
+### Optional real-device probe — not an editor GPU feature
+
+On the user's Windows machine, in this branch after pulling, install the **optional diagnostic-only** dependency into the existing ignored editor venv, then run the generated-pixel benchmark:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\hardware_report.ps1
+.\.venv\Scripts\python.exe -m pip install "pyopencl==2026.1.4"
+.\.venv\Scripts\python.exe scripts\probe_gpu.py --size 2400x1600
 ```
 
-The report contains GPU names, driver versions and RAM size only. WMI-reported VRAM may wrap above 4 GiB and is not trusted as a capacity check. Do not claim MUH-55 or MUH-56 complete until actual Windows metrics and hardware tests pass.
+This runs a representative exposure+contrast OpenCL kernel on a GPU device (prefer NVIDIA, otherwise another OpenCL GPU; never silently label an OpenCL CPU as accelerated), compares channel-by-channel against the editor's current CPU arithmetic on *generated* RGB pixels, and reports median **host-transfer + kernel + readback** time, kernel-only time, CPU time, output differences and device-reported memory. Nothing is enabled in preview/export by installing the probe; if OpenCL is unavailable or the driver fails it prints `gpu_executed: false` and the editor still runs CPU-only. It does not read photos, print paths, or upload results. Please share the JSON, including failures, to decide whether the measured speed/fidelity warrants an optional runtime backend. A successful kernel probe is **not** 16-bit NEF/ICC/Sharpness parity, packaged Windows compatibility, or proof of editor GPU acceleration. Do not mark MUH-56 complete until a real integrated backend, CPU fallback, full-fidelity comparisons and packaged hardware tests pass.

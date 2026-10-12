@@ -13,7 +13,15 @@
 .\.venv\Scripts\python.exe scripts\benchmark_editor.py --size 2400x1600
 ```
 
-This creates a temporary 3.84 MP JPG from the checked-in AI test image. Separate processes measure first full-size CPU render time and **process** peak resident memory; the JSON explicitly says `gpu_used: false`. Windows CI uploads `benchmark.json` next to the UI capture. These numbers exclude Tk latency, repeated batch edits, PNG/TIFF encoding, and actual NEF decode. On one Linux sandbox run, *before → after*: identity ~0.229 s / 205 MiB → ~0.035 s / 81 MiB; exposure/contrast/Sharpness ~0.371 s / 294 MiB → ~0.228 s / 210 MiB. Different CPUs, RAM, image data, drivers and cache temperatures will vary; compare on the same machine with the same input. The critical follow-up is real Windows p50/p95 latency and RSS with 20/100/500 images.
+For an **over-400-photo** import/UI/RAM diagnostic on Windows 11, with no personal pictures and bounded temporary generated files, run:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\benchmark_large_batch.py --count 421
+```
+
+It reports import duration, process peak RSS, queue depth, mounted thumbnail tiles and boot GPU readiness. Separate paths hardlink the same generated 1.92 MP fixture, so it does **not** reproduce 421 different camera JPG/NEF files, disk reads, export memory, p95 responsiveness, or real-photo sign-off. The UI remains operable during the run; keep the window open until its JSON prints. User Windows 11 results are still needed before asserting a 400+ real-photo memory target.
+
+The full-resolution diagnostic above creates a temporary 3.84 MP JPG from the checked-in AI test image. Separate processes measure first full-size CPU render time and **process** peak resident memory; the JSON explicitly says `gpu_used: false`. Windows CI uploads `benchmark.json` next to the UI capture. These numbers exclude Tk latency, repeated batch edits, PNG/TIFF encoding, and actual NEF decode. On one Linux sandbox run, *before → after*: identity ~0.229 s / 205 MiB → ~0.035 s / 81 MiB; exposure/contrast/Sharpness ~0.371 s / 294 MiB → ~0.228 s / 210 MiB. Different CPUs, RAM, image data, drivers and cache temperatures will vary; compare on the same machine with the same input. The critical follow-up is real Windows p50/p95 latency and RSS with 20/100/500 images.
 
 ## GPU: automatic at app startup, still not full-editor/export acceleration
 

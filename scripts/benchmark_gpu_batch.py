@@ -169,4 +169,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("Benchmark cancelled. Temporary generated files are cleaned up; "
+              "if Windows reports a locked file, wait for Python to exit before "
+              "removing only the named image-switcher-batch-gpu-* folder.",
+              file=sys.stderr, flush=True)
+        raise SystemExit(130) from None

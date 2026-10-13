@@ -354,21 +354,25 @@ def export_lossless(photo: Photo, batch: BatchSession, path: str, *, accelerator
     os.makedirs(parent, exist_ok=True)
     temporary = None
     try:
+        # Keep the file handle inside the context while Pillow/tifffile writes.
+        # Saving by *path* lets Pillow own the handle; Ctrl+C during PNG encode
+        # can then race our Windows unlink and mask KeyboardInterrupt with
+        # WinError 32 (and leave a large benchmark temp directory behind).
         with tempfile.NamedTemporaryFile(dir=parent, prefix=".render-", suffix=ext,
                                          delete=False) as out:
             temporary = out.name
-        if raw:
-            import tifffile
-            # rawpy postprocess returns sRGB; use standard sRGB ICC when available.
-            icc = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
-            tifffile.imwrite(temporary, image, photometric="rgb", compression="deflate",
-                             extratags=[(34675, "B", len(icc), icc, False)])
-        else:
-            kwargs = {"icc_profile": profile} if profile else {}
-            if ext == ".png":
-                image.save(temporary, format="PNG", compress_level=6, **kwargs)
+            if raw:
+                import tifffile
+                # rawpy postprocess returns sRGB; use standard sRGB ICC when available.
+                icc = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+                tifffile.imwrite(out, image, photometric="rgb", compression="deflate",
+                                 extratags=[(34675, "B", len(icc), icc, False)])
             else:
-                image.save(temporary, format="TIFF", compression="tiff_lzw", **kwargs)
+                kwargs = {"icc_profile": profile} if profile else {}
+                if ext == ".png":
+                    image.save(out, format="PNG", compress_level=6, **kwargs)
+                else:
+                    image.save(out, format="TIFF", compression="tiff_lzw", **kwargs)
         os.replace(temporary, path)
         return path
     finally:

@@ -32,6 +32,28 @@ def test_lossless_master_has_same_dimensions_and_changes_pixels(tmp_path):
         export_lossless(photo, batch, str(tmp_path / "lossy.jpg"))
 
 
+def test_ctrl_c_during_png_save_closes_handle_and_cleans_staging(tmp_path, monkeypatch):
+    batch, _photo, _original = sample(tmp_path)
+    output = tmp_path / "exports"
+    handles = []
+
+    def interrupted_save(image, fp, **kwargs):
+        # The export must hand Pillow an owned binary stream rather than a path
+        # so Ctrl+C releases the Windows handle before staging cleanup.
+        assert hasattr(fp, "write") and not fp.closed
+        handles.append(fp)
+        fp.write(b"incomplete PNG")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(Image.Image, "save", interrupted_save)
+    with pytest.raises(KeyboardInterrupt):
+        export_batch(batch, str(output))
+    assert handles and all(handle.closed for handle in handles)
+    assert not list(output.rglob("*.png"))
+    assert not list(output.glob(".export-*"))
+    assert not list(output.rglob(".render-*"))
+
+
 def test_crop_rotate_preserves_numbered_exception_and_mask(tmp_path):
     batch, photo, _ = sample(tmp_path)
     batch.set_batch("brightness", 0.2)

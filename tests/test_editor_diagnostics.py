@@ -6,6 +6,12 @@ import json
 from src.editor.diagnostics import installed_gpu_report
 
 
+def test_package_self_test_exports_protected_numbered_batch(capsys):
+    from src.app import editor_self_test
+    editor_self_test()
+    assert "protected full batch" in capsys.readouterr().out
+
+
 def test_generated_report_in_cpu_fallback_mode(tmp_path, monkeypatch):
     monkeypatch.setenv("IMAGE_SWITCHER_GPU", "off")
     path = tmp_path / "report.json"

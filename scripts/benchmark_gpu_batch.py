@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -27,6 +28,27 @@ from src.editor.render import render  # noqa: E402
 from src.editor.workflow import export_batch  # noqa: E402
 
 
+def _progress(stage: str, done: int, total: int) -> None:
+    """Bounded, immediate status; stdout stays machine-readable JSON."""
+    if done == 1 or done == total or done % max(1, total // 10) == 0:
+        print(f"{stage}: {done}/{total} complete", file=sys.stderr, flush=True)
+
+
+def _consume_master(directory: Path, number: int, source_stem: str) -> bytes:
+    """Compare the decoded master, then remove this generated benchmark pair.
+
+    Keep temporary disk use independent of batch length while still running
+    export_batch on the complete numbered session (no user files are touched).
+    """
+    master = directory / f"{number:04d}-{source_stem}.png"
+    project = directory / f"{number:04d}-{source_stem}.isphoto"
+    with Image.open(master) as image:
+        digest = hashlib.sha256(image.tobytes()).digest()
+    os.unlink(master)
+    os.unlink(project)
+    return digest
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--count", type=int, default=20)
@@ -41,6 +63,14 @@ def main() -> None:
             raise ValueError
     except ValueError:
         parser.error("Benchmark count must be 1..1000 and size WIDTHxHEIGHT up to 20 MP")
+    print(f"Starting {args.count} numbered {width}x{height} renders (CPU then GPU per photo). "
+          "Status goes to stderr; final JSON prints after all work.", file=sys.stderr, flush=True)
+    if args.write_exports:
+        print("Full-file export is enabled: two sequential CPU/GPU passes write PNG and "
+              ".isphoto projects to a temporary folder. This can take minutes for "
+              "hundreds of photos; completed test files are now verified and removed "
+              "as it goes. Ctrl+C once to cancel and let temporary cleanup finish.",
+              file=sys.stderr, flush=True)
     with tempfile.TemporaryDirectory(prefix="image-switcher-batch-gpu-") as directory:
         path = Path(directory) / "generated.jpg"
         with Image.open(ROOT / "tests/fixtures/ui-camera.jpg") as original:
@@ -57,7 +87,7 @@ def main() -> None:
         except Exception as exc:
             print(json.dumps({"gpu_executed": False, "error": str(exc)}, indent=2))
             raise SystemExit(2) from None
-        for photo in batch.photos:
+        for index, photo in enumerate(batch.photos, 1):
             start = perf_counter()
             cpu, _, _ = render(photo, batch)
             cpu_seconds.append(perf_counter() - start)
@@ -68,33 +98,51 @@ def main() -> None:
             gpu_seconds.append(perf_counter() - start)
             gpu_hashes.append(hashlib.sha256(accelerated.tobytes()).hexdigest())
             del accelerated
+            _progress("Full-resolution CPU/GPU renders", index, args.count)
         render_gpu_calls = accelerator.full_calls
         gpu_used = render_gpu_calls == args.count
         full_export = None
         if args.write_exports:
+            cpu_dir, gpu_dir = (Path(directory) / "cpu-exports",
+                                Path(directory) / "gpu-exports")
+            cpu_master_hashes: dict[int, bytes] = {}
+            cpu_validation_seconds = [0.0]
+
+            def on_cpu_export(number, done, total, _used_gpu):
+                started = perf_counter()
+                cpu_master_hashes[number] = _consume_master(cpu_dir, number, path.stem)
+                _progress("CPU PNG/.isphoto exports", done, total)
+                cpu_validation_seconds[0] += perf_counter() - started
+
             start = perf_counter()
-            cpu_outputs = export_batch(batch, str(Path(directory) / "cpu-exports"))
-            cpu_export_seconds = perf_counter() - start
-            gpu_export_numbers = []
+            cpu_outputs = export_batch(batch, str(cpu_dir), on_exported=on_cpu_export)
+            cpu_export_seconds = perf_counter() - start - cpu_validation_seconds[0]
+            gpu_export_numbers: list[int] = []
+            mismatched_numbers: list[int] = []
+            gpu_validation_seconds = [0.0]
+
+            def on_gpu_export(number, done, total, used_gpu):
+                started = perf_counter()
+                if used_gpu:
+                    gpu_export_numbers.append(number)
+                if _consume_master(gpu_dir, number, path.stem) != cpu_master_hashes[number]:
+                    mismatched_numbers.append(number)
+                _progress("GPU-path PNG/.isphoto exports", done, total)
+                gpu_validation_seconds[0] += perf_counter() - started
+
             start = perf_counter()
-            gpu_outputs = export_batch(
-                batch, str(Path(directory) / "gpu-exports"), accelerator=accelerator,
-                on_exported=lambda number, _done, _total, used:
-                    gpu_export_numbers.append(number) if used else None)
-            gpu_export_seconds = perf_counter() - start
-            export_hashes_match = True
-            for (_, cpu_master, _), (_, gpu_master, _) in zip(cpu_outputs, gpu_outputs):
-                # Compare decoded pixel bytes, not PNG container compression.
-                with Image.open(cpu_master) as a, Image.open(gpu_master) as b:
-                    export_hashes_match &= (hashlib.sha256(a.tobytes()).digest()
-                                            == hashlib.sha256(b.tobytes()).digest())
+            gpu_outputs = export_batch(batch, str(gpu_dir), accelerator=accelerator,
+                                       on_exported=on_gpu_export)
+            gpu_export_seconds = perf_counter() - start - gpu_validation_seconds[0]
             full_export = {"gpu_adjusted_photo_numbers": gpu_export_numbers,
                            "cpu_total_seconds": round(cpu_export_seconds, 3),
                            "gpu_path_total_seconds": round(gpu_export_seconds, 3),
-                           "all_master_pixel_hashes_match": export_hashes_match,
+                           "all_master_pixel_hashes_match": not mismatched_numbers,
                            "master_and_project_count": len(gpu_outputs),
-                           "note": "Includes PNG/.isphoto file writing to temporary folders. "
-                                   "Sequential runs have different disk cache conditions."}
+                           "note": "Times include full-batch PNG/.isphoto writes but exclude "
+                                   "per-file pixel verification and cleanup. Generated files "
+                                   "are deleted after verification to bound temporary disk use. "
+                                   "Sequential passes have different disk cache conditions."}
         peak = peak_memory_bytes()
         report = {"fixture": "repeated generated JPG bytes as distinct numbered entries",
                   "count": args.count, "size": [width, height],

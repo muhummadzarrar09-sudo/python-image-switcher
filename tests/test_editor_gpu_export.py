@@ -101,13 +101,29 @@ def test_full_export_benchmark_measures_numbered_masters(tmp_path, monkeypatch, 
     from scripts import benchmark_gpu_batch
 
     monkeypatch.setattr(benchmark_gpu_batch, "OpenCLPreview", FakeGPU)
-    monkeypatch.setattr(sys, "argv", ["benchmark_gpu_batch.py", "--count", "2",
+    consumed = []
+    real_consume = benchmark_gpu_batch._consume_master
+
+    def check_bounded_files(directory, number, source_stem):
+        # The CPU/GPU export folders must not grow linearly with batch count.
+        assert len(list(directory.glob("*.png"))) == 1
+        assert len(list(directory.glob("*.isphoto"))) == 1
+        consumed.append((directory.name, number))
+        return real_consume(directory, number, source_stem)
+
+    monkeypatch.setattr(benchmark_gpu_batch, "_consume_master", check_bounded_files)
+    monkeypatch.setattr(sys, "argv", ["benchmark_gpu_batch.py", "--count", "3",
                                   "--size", "320x240", "--write-exports"])
     benchmark_gpu_batch.main()
-    report = json.loads(capsys.readouterr().out)
-    assert report["count"] == 2
-    assert report["gpu_full_render_count"] == 2
+    output = capsys.readouterr()
+    report = json.loads(output.out)
+    assert "CPU PNG/.isphoto exports: 3/3 complete" in output.err
+    assert "GPU-path PNG/.isphoto exports: 3/3 complete" in output.err
+    assert consumed == [("cpu-exports", n) for n in (1, 2, 3)] + [
+        ("gpu-exports", n) for n in (1, 2, 3)]
+    assert report["count"] == 3
+    assert report["gpu_full_render_count"] == 3
     assert report["all_pixel_hashes_match"]
-    assert report["full_export"]["gpu_adjusted_photo_numbers"] == [1, 2]
+    assert report["full_export"]["gpu_adjusted_photo_numbers"] == [1, 2, 3]
     assert report["full_export"]["all_master_pixel_hashes_match"]
-    assert report["full_export"]["master_and_project_count"] == 2
+    assert report["full_export"]["master_and_project_count"] == 3

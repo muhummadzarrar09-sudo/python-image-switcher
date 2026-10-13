@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
+import sys
 from PIL import Image
 
 STATES = ("empty-editor", "populated-editor", "missing-source", "protected-batch", "crop-tools",
@@ -150,7 +152,12 @@ def main() -> None:
         measured = report["measured"].get("empty-editor", {}).get("client_pixels")
         details = (f" Requested {requested.get('width')}x{requested.get('height')} physical pixels; "
                    f"captured {measured}. Monitor work area: {report['monitor_work_area']}.")
-        parser.exit(1, "Failed: " + "; ".join(failed) + "." + details + "\n")
+        message = "Failed: " + "; ".join(failed) + "." + details
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            # Artifact download uses GitHub's external blob host. Surface the
+            # exact failure in the GitHub API-visible annotation as well.
+            print("::error file=scripts/ui_review.py,line=1::" + message, file=sys.stderr)
+        parser.exit(1, message + "\n")
 
 
 if __name__ == "__main__":

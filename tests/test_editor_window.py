@@ -200,6 +200,42 @@ def test_manual_mask_requires_live_after_tool_and_can_undo(tmp_path, tk_root):
         editor.destroy()
 
 
+def test_missing_source_is_correctable_without_losing_number_or_edits(tmp_path, tk_root):
+    from PIL import Image
+    from src.editor.window import EditorWindow
+
+    source = tmp_path / "camera.jpg"
+    Image.new("RGB", (64, 48), "blue").save(source)
+    original = source.read_bytes()
+    editor = EditorWindow(tk_root)
+    try:
+        tk_root.update()
+        photo = editor.batch.add_photo(str(source))
+        editor.select(photo.number)
+        editor.scope.set("Selected")
+        editor.change_value("contrast", .2)
+        source.unlink()  # simulates removable drive moved after import
+        editor.show_current()
+        deadline = time.monotonic() + 5
+        while "Source missing" not in editor.status.cget("text") and time.monotonic() < deadline:
+            tk_root.update()
+            time.sleep(.02)
+        assert editor.status.cget("text").startswith("#0001 · Source missing")
+        assert editor._canvas_bounds == (0, 0, 0, 0)
+        assert editor.batch.get(1).protected and editor.batch.excluded_numbers == [1]
+        source.write_bytes(original)
+        editor.select(photo.number)
+        deadline = time.monotonic() + 5
+        while editor._displayed_generation != editor._preview_generation and time.monotonic() < deadline:
+            tk_root.update()
+            time.sleep(.02)
+        assert editor._displayed_number == photo.number
+        assert editor.status.cget("text").startswith("#0001 · Protected")
+        assert editor.batch.effective_settings(1)["contrast"] == .2
+    finally:
+        editor.destroy()
+
+
 def test_export_escape_closes_without_writing(tmp_path, tk_root):
     from PIL import Image
     from src.editor.window import EditorWindow, ExportOptions
@@ -222,13 +258,16 @@ def test_export_escape_closes_without_writing(tmp_path, tk_root):
             time.sleep(.02)
         assert dialog.grab_current() == dialog
         dialog.folder.set(str(tmp_path / "output"))
-        # Windows CI desktops may reject synthetic key events when the runner
-        # cannot give a withdrawn-root popup real OS keyboard focus. Verify
-        # bindings exist on the native entry, then exercise the same close
-        # callback used by Escape and Cancel; physical keys remain a manual gate.
-        assert dialog.creator._entry.bind("<Escape>")
-        assert dialog.folder_entry._entry.bind("<Escape>")
-        dialog.close()
+        # CTk entries, radio buttons and canvas-backed buttons all need the
+        # modal's unique Escape bindtag; Toplevel binding alone is not inherited.
+        import customtkinter as ctk
+        tag = dialog._escape_tag
+        assert dialog.bind_class(tag, "<Escape>")
+        assert tag in dialog.creator._entry.bindtags()
+        assert tag in dialog.folder_entry._entry.bindtags()
+        radios = [child for child in dialog.winfo_children() if isinstance(child, ctk.CTkRadioButton)]
+        assert radios and tag in radios[0]._canvas.bindtags()
+        dialog._close_on_escape(None)  # OS physical key remains a manual gate
         assert not dialog.winfo_exists()
         assert not (tmp_path / "output").exists()
         assert editor.batch.rights == {}

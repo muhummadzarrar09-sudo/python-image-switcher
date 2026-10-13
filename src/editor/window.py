@@ -768,8 +768,17 @@ class EditorWindow(ctk.CTkToplevel):
         self._canvas_bounds = (0, 0, 0, 0)
         self._sync_mask_status()
         self.canvas.delete("all")
-        self.canvas.create_text(10, 20, anchor="nw", fill="orange", text=error[:105])
-        self.status.configure(text=f"Preview failed: {error[:80]}")
+        if self.current is not None and not Path(self.selected_photo().source).is_file():
+            number = self.current
+            self.canvas.create_text(max(1, self.canvas.winfo_width()) // 2,
+                                    max(1, self.canvas.winfo_height()) // 2,
+                                    fill="#e4bd83", font=("Arial", 14), justify="center",
+                                    text=f"Photo #{number:04d} source is missing\n"
+                                         "Restore the original file, then reselect this photo.")
+            self.status.configure(text=f"#{number:04d} · Source missing · restore the original and reselect")
+        else:
+            self.canvas.create_text(10, 20, anchor="nw", fill="orange", text=error[:105])
+            self.status.configure(text=f"Preview failed: {error[:80]}")
 
     def destroy(self):
         # Workers never call Tk. Invalidate pending previews before destroying
@@ -1112,10 +1121,12 @@ class ExportOptions(ctk.CTkToplevel):
                                    fg_color="#1d2025")
         self.notice.pack(padx=25, pady=(0, 8))
         self.notice.insert(0, editor.batch.rights.get("copyright_notice", ""))
-        # CTkEntry wraps a native Entry whose bindtags do not reliably include
-        # this CTkToplevel on Windows. Bind the actual focused controls too.
-        for entry in (self.folder_entry, self.creator, self.notice):
-            entry.bind("<Escape>", lambda _event: self.close())
+        # Tk's child bindtags do not inherit the Toplevel's Escape binding.
+        # Register a tag on every existing CTk/native descendant so Escape
+        # closes this modal from radios, buttons, checkboxes AND native entries.
+        # A unique tag avoids changing another window's key bindings.
+        self._escape_tag = f"ImageSwitcherExportEscape{id(self)}"
+        self.bind_class(self._escape_tag, "<Escape>", self._close_on_escape)
         ctk.CTkLabel(self, text="No signed credential or watermark. Rights are stored in .isphoto only.",
                      text_color="#d6a773", font=ctk.CTkFont(size=10)).pack(padx=25, pady=(0, 7))
         ctk.CTkLabel(self, text="Existing output names stop export; files are never overwritten.",
@@ -1130,7 +1141,19 @@ class ExportOptions(ctk.CTkToplevel):
                       command=self.close).pack(side="left", padx=(0, 9))
         ctk.CTkButton(actions, text="Export now", width=115, fg_color="#1e64b8",
                       command=self.confirm).pack(side="left")
+        self._tag_descendants_for_escape(self)
         self.after_idle(self._grab_when_visible)
+
+    def _tag_descendants_for_escape(self, widget):
+        tags = widget.bindtags()
+        if self._escape_tag not in tags:
+            widget.bindtags((self._escape_tag, *tags))
+        for child in widget.winfo_children():
+            self._tag_descendants_for_escape(child)
+
+    def _close_on_escape(self, _event):
+        self.close()
+        return "break"
 
     def _grab_when_visible(self):
         if self.winfo_exists():
@@ -1174,8 +1197,16 @@ class ExportOptions(ctk.CTkToplevel):
             return
         if self.grab_current() == self:
             self.grab_release()
-        if self.shade and self.shade.winfo_exists():
-            self.shade.destroy()
         self.destroy()
         if self.editor.winfo_exists():
             self.editor.focus_set()
+
+    def destroy(self):
+        # Also run when the parent editor is destroyed with the dialog open.
+        tag = getattr(self, "_escape_tag", None)
+        if tag:
+            self.unbind_class(tag, "<Escape>")
+            self._escape_tag = None
+        if getattr(self, "shade", None) and self.shade.winfo_exists():
+            self.shade.destroy()
+        super().destroy()

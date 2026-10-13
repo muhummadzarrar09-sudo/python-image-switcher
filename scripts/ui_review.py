@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from PIL import Image
 
-STATES = ("empty-editor", "populated-editor", "protected-batch", "crop-tools",
+STATES = ("empty-editor", "populated-editor", "missing-source", "protected-batch", "crop-tools",
           "background-tools", "background-before", "background-rejected",
           "background-ready", "export-overlay")
 
@@ -99,6 +99,9 @@ def audit_capture(directory: Path) -> dict:
     states = meta["states"]
     check("Empty state has no selected photo", states.get("empty-editor", {}).get("selected_number") is None)
     check("Fixture has stable selected #0001", states.get("populated-editor", {}).get("selected_number") == 1)
+    check("Missing source is a separate numbered correctable state",
+          states.get("missing-source", {}).get("selected_number") == 3
+          and states.get("missing-source", {}).get("source_missing") is True)
     check("Protected photo stays numbered", 1 in states.get("protected-batch", {}).get("protected_numbers", []))
     check("Before disarms manual mask", "Select After" in states.get("background-before", {}).get("mask_status", ""))
     check("Undersized image rejected without effect", "upscaled" in meta.get("background_rejection", "")

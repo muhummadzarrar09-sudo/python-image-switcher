@@ -90,7 +90,19 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
         editor.batch.add_photo(str(photos[1] if len(photos) > 1 else photos[0]))
         editor.select(first.number)
 
+    def missing_source():
+        # A disposable copy, never the user's source. The numbered entry must
+        # remain visible with a repair instruction when its file disappears.
+        missing = output / "temporarily-missing.jpg"
+        Image.new("RGB", (64, 48), "#456789").save(missing)
+        temporary = editor.batch.add_photo(str(missing))
+        editor.select(temporary.number)  # cache its rail tile before removal
+        missing.unlink()
+        editor.show_current()
+
     def protect():
+        editor.batch.remove_photo(editor.current)  # discard only the disposable #0003
+        editor.select(1)
         editor.scope.set("Selected")
         editor.sync_sliders()
         editor.change_value("contrast", .25)
@@ -143,7 +155,7 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
         popups["export-overlay"] = dialog
 
     states.extend([("empty-editor", lambda: None), ("populated-editor", populate),
-                   ("protected-batch", protect), ("crop-tools", crop),
+                   ("missing-source", missing_source), ("protected-batch", protect), ("crop-tools", crop),
                    ("background-tools", background), ("background-before", background_before),
                    ("background-rejected", background_rejected),
                    ("background-ready", background_ready), ("export-overlay", export)])
@@ -177,9 +189,14 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
             # Screenshot only a completed current preview. An arbitrary timer
             # could otherwise capture a stale photo or "Rendering preview…"
             # under a slower driver/NEF decoder and still report success.
-            if editor.current is not None and editor._displayed_generation != editor._preview_generation:
+            if name == "missing-source":
+                ready = "Source missing" in editor.status.cget("text")
+            else:
+                ready = (editor.current is None or
+                         editor._displayed_generation == editor._preview_generation)
+            if not ready:
                 if time.monotonic() >= deadline:
-                    raise RuntimeError(f"Timed out waiting for {name} preview")
+                    raise RuntimeError(f"Timed out waiting for {name} preview/error state")
                 editor.after(100, lambda: screenshot(index, name, deadline))
                 return
             rect = bounds(editor)  # Tk client-area coordinates; titlebar/taskbar excluded
@@ -189,7 +206,9 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
             state = {"editor_client": rect, "image_pixels": list(image.size),
                      "selected_number": editor.current,
                      "protected_numbers": editor.batch.excluded_numbers,
-                     "scope": editor.scope.get()}
+                     "scope": editor.scope.get(),
+                     "source_missing": name == "missing-source" and
+                                       not Path(editor.selected_photo().source).exists()}
             if editor.background_window and editor.background_window.winfo_exists():
                 state["mask_status"] = editor.background_window.mask_status.cget("text")
                 state["background_mode"] = editor.selected_photo().background.get("mode", "none")

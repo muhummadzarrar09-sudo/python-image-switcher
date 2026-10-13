@@ -48,7 +48,9 @@ def test_capture_audit_reports_actual_bounds_and_never_approves_fixture(tmp_path
     for name in STATES:
         state = {"editor_client": client, "image_pixels": [1000, 700],
                  "header": header, "sidebar": rail, "workspace": workspace,
-                 "panel": panel, "canvas": canvas, "selected_number": None if name == "empty-editor" else 1,
+                 "panel": panel, "canvas": canvas,
+                 "selected_number": None if name == "empty-editor" else 3 if name == "missing-source" else 1,
+                 "source_missing": name == "missing-source",
                  "protected_numbers": [1] if name != "empty-editor" else []}
         if name.startswith("background"):
             state["background_mode"] = "color" if name == "background-ready" else "none"

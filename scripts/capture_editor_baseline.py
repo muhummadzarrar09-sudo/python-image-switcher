@@ -107,6 +107,7 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
         "platform": platform.platform(),
         "requested_window": {"width": size[0], "height": size[1]},
         "dpi_for_window": dpi_for_window(editor),
+        "monitor_probe_attempted": True,
         "monitor_work_area": monitor_work_area(editor),
         "tk_pixels_per_point": float(root.tk.call("tk", "scaling")),
         "ctk_window_scaling": float(editor._get_window_scaling()),
@@ -253,6 +254,8 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
                 widget = getattr(editor, key, None)
                 if widget:
                     state[key] = bounds(widget)
+            state["header_actions"] = [bounds(widget) for widget in editor.header.winfo_children()
+                                       if isinstance(widget, (ctk.CTkButton, ctk.CTkSegmentedButton))]
             popup = popups.get(name)
             if popup and popup.winfo_exists():
                 popup_rect = bounds(popup)

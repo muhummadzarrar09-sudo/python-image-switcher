@@ -76,6 +76,10 @@ def audit_capture(directory: Path) -> dict:
               and all(abs(a - b) <= 3 for a, b in zip(pixels, (client["width"], client["height"]))))
         for section in ("header", "sidebar", "workspace", "panel"):
             check(f"{name} {section} inside client", within(state[section], client))
+        if "header_actions" in state:
+            check(f"{name} header actions are visible", len(state["header_actions"]) >= 8
+                  and all(action["width"] >= 30 and within(action, state["header"], tolerance=2)
+                          for action in state["header_actions"]))
         check(f"{name} canvas inside workspace", within(state["canvas"], state["workspace"]))
         sidebar, workspace, panel = (state[key] for key in ("sidebar", "workspace", "panel"))
         check(f"{name} three-panel order", sidebar["x"] < workspace["x"] < panel["x"]
@@ -105,6 +109,8 @@ def audit_capture(directory: Path) -> dict:
               abs(state["editor_client"][axis] - requested.get(axis, -100000)) <= 3
               for state in states.values() for axis in ("width", "height")))
     work_area = meta.get("monitor_work_area")
+    if meta.get("monitor_probe_attempted"):
+        check("Monitor working area probe succeeded", work_area is not None)
     if work_area is not None:
         check("Editor remains inside monitor working area",
               all(within(state["editor_client"], work_area, tolerance=3)
@@ -135,6 +141,7 @@ def audit_capture(directory: Path) -> dict:
             "requested_window": requested,
             "monitor_work_area": work_area,
             "screen_fit_verified": work_area is not None,
+            "header_actions_verified": bool(states) and all("header_actions" in s for s in states.values()),
             "measured": measures, "contrast_of_current_tokens": contrast, "checks": checks}
 
 

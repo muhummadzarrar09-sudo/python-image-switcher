@@ -70,7 +70,19 @@ def test_capture_audit_reports_actual_bounds_and_never_approves_fixture(tmp_path
     report = audit_capture(tmp_path)
     assert report["passed"] and not report["approved_reference"] and report["fixture_only"]
     assert report["screen_fit_verified"]
+    assert not report["header_actions_verified"]  # legacy captures lack button bounds
     assert report["measured"]["populated-editor"]["workspace_width"] == 530
+    states["populated-editor"]["header_actions"] = [
+        {"x": 20 + i * 80, "y": 25, "width": 55, "height": 30} for i in range(8)]
+    (tmp_path / "capture.json").write_text(json.dumps(meta), encoding="utf-8")
+    assert audit_capture(tmp_path)["passed"]
+    states["populated-editor"]["header_actions"][7]["x"] = 1010
+    (tmp_path / "capture.json").write_text(json.dumps(meta), encoding="utf-8")
+    clipped = audit_capture(tmp_path)
+    assert not clipped["passed"]
+    assert "populated-editor header actions are visible" in [
+        x["check"] for x in clipped["checks"] if not x["passed"]]
+    del states["populated-editor"]["header_actions"]
     meta["requested_window"]["width"] = 1500  # DPI minsize must not silently change the requested test
     (tmp_path / "capture.json").write_text(json.dumps(meta), encoding="utf-8")
     report = audit_capture(tmp_path)
@@ -85,6 +97,12 @@ def test_capture_audit_reports_actual_bounds_and_never_approves_fixture(tmp_path
     assert "Editor remains inside monitor working area" in [
         x["check"] for x in report["checks"] if not x["passed"]]
     meta["monitor_work_area"]["height"] = 900
+    meta["monitor_probe_attempted"] = True
+    original_area = meta.pop("monitor_work_area")
+    (tmp_path / "capture.json").write_text(json.dumps(meta), encoding="utf-8")
+    assert "Monitor working area probe succeeded" in [
+        x["check"] for x in audit_capture(tmp_path)["checks"] if not x["passed"]]
+    meta["monitor_work_area"] = original_area
     states["populated-editor"]["panel"] = {"x": 950, "y": 68, "width": 306, "height": 652}
     (tmp_path / "capture.json").write_text(json.dumps(meta), encoding="utf-8")
     report = audit_capture(tmp_path)

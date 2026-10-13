@@ -8,7 +8,7 @@ import tifffile
 from src.editor.batch import BatchSession
 from src.editor.project import read_project
 from src.editor.render import PhotoRenderError, edited_size, export_lossless, render, source_info, still_photo_frames
-from src.editor.workflow import export_batch, import_project
+from src.editor.workflow import export_batch, import_project, plan_export
 
 
 def sample(tmp_path):
@@ -158,6 +158,30 @@ def test_explicit_selected_export_keeps_stable_number_and_avoids_other_photos(tm
         export_batch(batch, str(tmp_path / "bad"), numbers=[99])
     with pytest.raises(ValueError, match="distinct"):
         export_batch(batch, str(tmp_path / "bad"), numbers=[2, 2])
+
+
+def test_export_dialog_preflight_is_read_only_and_respects_scope(tmp_path):
+    batch, first, _ = sample(tmp_path)
+    other = tmp_path / "second.jpg"
+    Image.new("RGB", (20, 15), "red").save(other)
+    second = batch.add_photo(str(other))
+    batch.edit_photo(second.number, "contrast", .2)  # protected remains in batch
+    destination = tmp_path / "output"
+    plans = plan_export(batch, str(destination))
+    assert [photo.number for photo, _, _ in plans] == [first.number, second.number]
+    assert not destination.exists()  # opening/preflighting Export creates nothing
+    destination.mkdir()
+    (destination / "0001-camera.png").write_bytes(b"existing output")
+    with pytest.raises(FileExistsError, match="Refusing to overwrite"):
+        plan_export(batch, str(destination))
+    assert (destination / "0001-camera.png").read_bytes() == b"existing output"
+    selected = plan_export(batch, str(destination), [second.number])
+    assert [photo.number for photo, _, _ in selected] == [second.number]
+    assert not list(destination.glob("*.isphoto"))
+    with pytest.raises(ValueError, match="folder"):
+        plan_export(batch, " ")
+    with pytest.raises(ValueError, match="folder, not a file"):
+        plan_export(batch, str(other))
 
 
 def test_project_embeds_supplied_background_for_portable_reedit(tmp_path):

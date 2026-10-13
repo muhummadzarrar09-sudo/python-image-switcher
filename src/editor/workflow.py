@@ -13,14 +13,16 @@ from .project import create_project, read_project
 from .render import export_lossless, PhotoRenderError
 
 
-def export_batch(batch: BatchSession, directory: str, *, numbers: list[int] | None = None,
-                 accelerator=None, on_exported=None) -> list[tuple[int, str, str]]:
-    """Export all numbered photos (including protected), or an explicit selection.
+def plan_export(batch: BatchSession, directory: str, numbers: list[int] | None = None
+                ) -> list[tuple[Photo, str, str]]:
+    """Check names and scope without creating a folder or touching any photo.
 
-    Masters are PNG for decoded 8-bit photos and RGB 16-bit TIFF for NEF.
-    Returns [(stable number, master path, project path)]. On failure, already
-    exported photos remain; the raised error identifies the failed operation.
+    Used by the popup for a correctable preflight and by the export worker
+    immediately before writing. Publication still uses exclusive links/ZIP
+    creation, so a collision appearing after this check cannot overwrite.
     """
+    if not directory or not directory.strip():
+        raise ValueError("Choose a destination folder")
     if numbers is None:
         photos = batch.photos
     else:
@@ -32,8 +34,9 @@ def export_batch(batch: BatchSession, directory: str, *, numbers: list[int] | No
             raise ValueError("An export number is not in this batch")
     if not photos:
         raise ValueError("Add still photos before exporting")
-    os.makedirs(directory, exist_ok=True)
     directory = os.path.abspath(directory)
+    if os.path.exists(directory) and not os.path.isdir(directory):
+        raise ValueError("Choose a folder, not a file")
     plans = []
     for photo in photos:
         basename = re.sub(r"[^\w.-]+", "_", Path(photo.source).stem)[:80] or "photo"
@@ -44,6 +47,20 @@ def export_batch(batch: BatchSession, directory: str, *, numbers: list[int] | No
         if master == os.path.abspath(photo.source) or os.path.exists(master) or os.path.exists(project):
             raise FileExistsError(f"Refusing to overwrite {master} or {project}")
         plans.append((photo, master, project))
+    return plans
+
+
+def export_batch(batch: BatchSession, directory: str, *, numbers: list[int] | None = None,
+                 accelerator=None, on_exported=None) -> list[tuple[int, str, str]]:
+    """Export all numbered photos (including protected), or an explicit selection.
+
+    Masters are PNG for decoded 8-bit photos and RGB 16-bit TIFF for NEF.
+    Returns [(stable number, master path, project path)]. On failure, already
+    exported photos remain; the raised error identifies the failed operation.
+    """
+    plans = plan_export(batch, directory, numbers)
+    os.makedirs(directory, exist_ok=True)
+    directory = os.path.abspath(directory)
     result = []
     for photo, master, project in plans:
         gpu_calls_before = getattr(accelerator, "full_calls", 0)

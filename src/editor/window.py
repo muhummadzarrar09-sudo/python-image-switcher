@@ -23,7 +23,7 @@ from .batch import BatchSession, EDIT_FIELDS
 from .gpu_preview import OpenCLPreview, eligible_export
 from .preview import PreviewRenderer, PreviewRequest, mask_point, preview_label
 from .render import STILL_EXTENSIONS, edited_size, source_info, still_photo_frames, _open_source
-from .workflow import export_batch, import_project
+from .workflow import export_batch, import_project, plan_export
 from .version import ALPHA_VERSION
 
 
@@ -1119,7 +1119,11 @@ class ExportOptions(ctk.CTkToplevel):
         ctk.CTkLabel(self, text="No signed credential or watermark. Rights are stored in .isphoto only.",
                      text_color="#d6a773", font=ctk.CTkFont(size=10)).pack(padx=25, pady=(0, 7))
         ctk.CTkLabel(self, text="Existing output names stop export; files are never overwritten.",
-                     text_color="#bbc4cf", font=ctk.CTkFont(size=11)).pack(padx=25, pady=(0, 7))
+                     text_color="#bbc4cf", font=ctk.CTkFont(size=11)).pack(padx=25, pady=(0, 5))
+        self.preflight_status = ctk.CTkLabel(self, text="", text_color="#ffc188",
+                                              wraplength=475, font=ctk.CTkFont(size=11))
+        self.preflight_status.pack(fill="x", padx=25, pady=(0, 3))
+        self.folder.trace_add("write", lambda *_: self.preflight_status.configure(text=""))
         actions = ctk.CTkFrame(self, fg_color="transparent")
         actions.pack(anchor="e", padx=25, pady=(4, 14))
         ctk.CTkButton(actions, text="Cancel", width=100, fg_color="#363d47",
@@ -1148,10 +1152,19 @@ class ExportOptions(ctk.CTkToplevel):
 
     def confirm(self):
         destination = self.folder.get().strip()
-        if not destination:
-            messagebox.showwarning("Choose a folder", "Select a destination folder first.", parent=self)
-            return
         numbers = [self.editor.current] if self.selection.get().startswith("Selected photo") else None
+        try:
+            # Refuse existing names while the user can still correct this
+            # dialog. The worker repeats the check and publishes exclusively.
+            plan_export(self.editor.batch, destination, numbers)
+        except FileExistsError:
+            self.preflight_status.configure(text="Output name already exists. Choose another folder or export only the selected photo.")
+            self.folder_entry.focus_set()
+            return
+        except (ValueError, OSError) as exc:
+            self.preflight_status.configure(text=str(exc)[:170])
+            self.folder_entry.focus_set()
+            return
         rights = {"creator": self.creator.get().strip(), "copyright_notice": self.notice.get().strip()}
         self.close()
         self.editor.begin_export(destination, rights, numbers)

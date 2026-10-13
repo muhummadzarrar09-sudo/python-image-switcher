@@ -205,6 +205,41 @@ def test_export_escape_closes_without_writing(tmp_path, tk_root):
         editor.destroy()
 
 
+def test_export_collision_stays_in_popup_and_cancel_keeps_sources(tmp_path, tk_root):
+    from PIL import Image
+    from src.editor.window import EditorWindow, ExportOptions
+
+    source = tmp_path / "camera.jpg"
+    Image.new("RGB", (32, 24), "blue").save(source)
+    output = tmp_path / "output"
+    output.mkdir()
+    existing = output / "0001-camera.png"
+    existing.write_bytes(b"keep this")
+    editor = EditorWindow(tk_root)
+    dialog = None
+    try:
+        tk_root.update()
+        editor.select(editor.batch.add_photo(str(source)).number)
+        dialog = ExportOptions(editor)
+        tk_root.update()
+        dialog.folder.set(str(output))
+        dialog.creator.insert(0, "Owner")
+        dialog.confirm()
+        assert dialog.winfo_exists()  # user can correct folder/scope
+        assert "already exists" in dialog.preflight_status.cget("text")
+        assert dialog.folder.get() == str(output)
+        assert dialog.creator.get() == "Owner"
+        assert not editor.busy and editor.batch.rights == {}
+        assert existing.read_bytes() == b"keep this"
+        assert not list(output.glob("*.isphoto"))
+        dialog.close()
+        assert existing.read_bytes() == b"keep this"
+    finally:
+        if dialog and dialog.winfo_exists():
+            dialog.close()
+        editor.destroy()
+
+
 def test_large_numbered_batch_keeps_rail_widget_count_bounded(tmp_path, tk_root):
     from PIL import Image
     from src.editor.window import EditorWindow, RAIL_PAGE_SIZE

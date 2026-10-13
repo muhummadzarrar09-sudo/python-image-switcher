@@ -23,7 +23,7 @@ jobs:
       - name: Smoke-test real desktop controls and export dialog
         shell: pwsh
         run: |
-          & .\.venv\Scripts\python.exe -m pytest -q tests/test_editor_window.py tests/test_editor_import.py tests/test_editor_preview.py tests/test_capture_editor_baseline.py *> gui-test.log
+          & .\.venv\Scripts\python.exe -m pytest -q tests/test_editor_window.py tests/test_editor_window_geometry.py tests/test_editor_import.py tests/test_editor_preview.py tests/test_capture_editor_baseline.py *> gui-test.log
           if ($LASTEXITCODE -ne 0) {
             $tail = (Get-Content gui-test.log -Tail 75) -join '%0A'
             Write-Host "::error file=tests/test_editor_window.py,line=1::$tail"

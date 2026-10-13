@@ -95,6 +95,45 @@ def test_primary_and_narrow_header_actions_stay_on_screen(tk_root):
         editor.destroy()
 
 
+def test_simulated_150_percent_narrow_client_keeps_controls_inside(tk_root):
+    """Supplement (not replace) actual DPI captures with a scaled Tk smoke test."""
+    import customtkinter as ctk
+    from src.editor.window import EditorWindow
+
+    editor = None
+    try:
+        ctk.set_widget_scaling(1.5)
+        ctk.set_window_scaling(1.5)
+        editor = EditorWindow(tk_root)
+        scale = editor._get_window_scaling()
+        editor.geometry(f"{round(1000 / scale)}x{round(700 / scale)}")
+        tk_root.update()
+        assert abs(editor.winfo_width() - 1000) <= 3, editor.winfo_width()
+        assert abs(editor.winfo_height() - 700) <= 3, editor.winfo_height()
+        client_right = editor.winfo_rootx() + editor.winfo_width()
+        header = editor.header
+        assert editor._header_wrapped
+        assert header.winfo_rootx() + header.winfo_width() <= client_right + 3
+        for group in (editor._header_left, editor._header_right):
+            for action in group.winfo_children():
+                if isinstance(action, (ctk.CTkButton, ctk.CTkSegmentedButton)):
+                    assert action.winfo_width() >= 30
+                    assert action.winfo_rootx() + action.winfo_width() <= client_right + 3, (
+                        action.cget("text") if isinstance(action, ctk.CTkButton) else "scope",
+                        action.winfo_rootx(), action.winfo_width(), client_right)
+        assert editor.panel.winfo_rootx() + editor.panel.winfo_width() <= client_right + 3, (
+            editor.sidebar.winfo_width(), editor.workspace.winfo_width(),
+            editor.panel.winfo_rootx(), editor.panel.winfo_width(), client_right)
+        assert editor.canvas.winfo_width() >= 180
+        assert editor._compact_footer
+        assert editor.panel_view.winfo_manager() == "pack"
+    finally:
+        if editor and editor.winfo_exists():
+            editor.destroy()
+        ctk.set_window_scaling(1)
+        ctk.set_widget_scaling(1)
+
+
 def test_background_validation_and_stale_mask_click_are_non_destructive(tmp_path, tk_root):
     from PIL import Image
     from src.editor.window import EditorWindow

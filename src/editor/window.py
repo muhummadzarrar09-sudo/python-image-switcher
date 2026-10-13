@@ -25,6 +25,7 @@ from .preview import PreviewRenderer, PreviewRequest, mask_point, preview_label
 from .render import STILL_EXTENSIONS, edited_size, source_info, still_photo_frames, _open_source
 from .workflow import export_batch, import_project, plan_export
 from .version import ALPHA_VERSION
+from .window_geometry import place_popup
 
 
 def _thumbnail_pixels(path: str, frame_index: int) -> Image.Image:
@@ -163,8 +164,11 @@ class EditorWindow(ctk.CTkToplevel):
         ctk.CTkLabel(header_left, text="IS", width=29, height=29, fg_color="#19539a",
                      corner_radius=5, font=ctk.CTkFont(size=14, weight="bold")).pack(
                          side="left", padx=(10, 7), pady=8)
-        ctk.CTkLabel(header_left, text="Image Switcher", text_color="#f3f5f9",
-                     font=ctk.CTkFont(size=15, weight="bold")).pack(side="left", padx=(0, 8))
+        self._brand_icon = header_left.winfo_children()[0]
+        self._brand_label = ctk.CTkLabel(header_left, text="Image Switcher", text_color="#f3f5f9",
+                                          font=ctk.CTkFont(size=15, weight="bold"))
+        self._brand_label.pack(side="left", padx=(0, 8))
+        self._brand_visible = True
         for text, width, action in (("Add", 56, self.add_files), ("Open", 56, self.open_session),
                                     ("Save", 56, self.save_session), ("Project", 67, self.open_project),
                                     ("Crop", 56, self.open_crop_tools),
@@ -221,25 +225,38 @@ class EditorWindow(ctk.CTkToplevel):
         workspace.grid(row=1, column=1, sticky="nsew")
         workspace.grid_rowconfigure(0, weight=1)
         workspace.grid_columnconfigure(0, weight=1)
-        self.canvas = tk.Canvas(workspace, bg="#17191d", highlightthickness=0)
+        # Tk Canvas defaults to a ~394px requested width, which forces the
+        # adjustments outside a 1000px physical client at 150% scaling.
+        # The weighted grid expands this small request when space is available.
+        self.canvas = tk.Canvas(workspace, width=120, height=120,
+                                bg="#17191d", highlightthickness=0)
         self.canvas.grid(row=0, column=0, sticky="nsew", padx=10, pady=(10, 0))
         self.canvas.bind("<Button-1>", self.paint_mask)
         self.canvas.bind("<Configure>", self.on_canvas_resize)
-        footer = ctk.CTkFrame(workspace, height=50, fg_color="#1b1e23", corner_radius=0)
+        footer = self.footer = ctk.CTkFrame(workspace, height=50, fg_color="#1b1e23", corner_radius=0)
         footer.grid(row=1, column=0, sticky="ew")
+        footer.grid_propagate(False)  # labels must not enlarge the workspace column
         self.status = ctk.CTkLabel(footer, text="Add still photos to begin", anchor="w",
                                    text_color="#aab0b9", font=ctk.CTkFont(size=11))
         self.status.pack(side="left", padx=15, fill="x", expand=True)
-        ctk.CTkLabel(footer, text="Fit preview · original-size master on export", text_color="#858e9b",
-                     font=ctk.CTkFont(size=10)).pack(side="right", padx=(5, 15))
-        ctk.CTkSegmentedButton(footer, variable=self.view_mode, values=["Before", "After"],
-                               width=138, height=30, selected_color="#205da7",
-                               command=lambda _: self.show_current()).pack(side="right", padx=5, pady=8)
+        self.footer_hint = ctk.CTkLabel(footer, text="Fit preview · original-size master on export",
+                                        text_color="#858e9b", font=ctk.CTkFont(size=10))
+        self.footer_hint.pack(side="right", padx=(5, 15))
+        self.footer_view = ctk.CTkSegmentedButton(footer, variable=self.view_mode,
+                                                  values=["Before", "After"], width=138, height=30,
+                                                  selected_color="#205da7", command=lambda _: self.show_current())
+        self.footer_view.pack(side="right", padx=5, pady=8)
+        footer.bind("<Configure>", self._layout_footer)
 
         panel = self.panel = ctk.CTkScrollableFrame(self, width=295, fg_color="#21252b", corner_radius=0)
         panel.grid(row=1, column=2, sticky="nsew")
-        ctk.CTkLabel(panel, text="ADJUSTMENTS", anchor="w", text_color="#c9ced7",
-                     font=ctk.CTkFont(size=11, weight="bold")).pack(fill="x", padx=12, pady=(12, 10))
+        self.panel_heading = ctk.CTkLabel(panel, text="ADJUSTMENTS", anchor="w",
+                                           text_color="#c9ced7", font=ctk.CTkFont(size=11, weight="bold"))
+        self.panel_heading.pack(fill="x", padx=12, pady=(12, 10))
+        self.panel_view = ctk.CTkSegmentedButton(panel, variable=self.view_mode,
+                                                 values=["Before", "After"], width=138, height=30,
+                                                 selected_color="#205da7", command=lambda _: self.show_current())
+        self._compact_footer = False
         # Real capabilities only: do not create fake Whites/Clarity/Denoise
         # controls simply because the AI mockup drew them.
         for field, (low, high) in EDIT_FIELDS.items():
@@ -262,9 +279,32 @@ class EditorWindow(ctk.CTkToplevel):
         self.show_current()
         self._poll_gpu_status()
 
+    def _layout_footer(self, event):
+        if event.widget != self.footer:
+            return
+        compact = event.width < 500
+        if compact == self._compact_footer:
+            return
+        self._compact_footer = compact
+        if compact:
+            self.footer_hint.pack_forget()
+            self.footer_view.pack_forget()
+            self.panel_view.pack(fill="x", padx=12, pady=(0, 8), after=self.panel_heading)
+        else:
+            self.panel_view.pack_forget()
+            self.footer_hint.pack(side="right", padx=(5, 15))
+            self.footer_view.pack(side="right", padx=5, pady=8)
+
     def _layout_header(self, event):
         if event.widget != self.header:
             return
+        show_brand = event.width >= 1100
+        if show_brand != self._brand_visible:
+            if show_brand:
+                self._brand_label.pack(side="left", after=self._brand_icon, padx=(0, 8))
+            else:
+                self._brand_label.pack_forget()
+            self._brand_visible = show_brand
         needed = self._header_left.winfo_reqwidth() + self._header_right.winfo_reqwidth() + 8
         wrap = event.width < needed
         if wrap == self._header_wrapped:
@@ -988,7 +1028,7 @@ class CropTools(ctk.CTkToplevel):
         super().__init__(editor)
         self.editor = editor
         self.title("Crop / orientation")
-        self.geometry("375x305")
+        place_popup(self, editor, 375, 305)
         self.resizable(False, False)
         self.transient(editor)
         self.configure(fg_color="#25282d")
@@ -1015,7 +1055,7 @@ class BackgroundTools(ctk.CTkToplevel):
         super().__init__(editor)
         self.editor = editor
         self.title("Background / manual mask")
-        self.geometry("410x435")
+        place_popup(self, editor, 410, 435)
         self.resizable(False, False)
         self.transient(editor)
         self.configure(fg_color="#25282d")
@@ -1091,7 +1131,11 @@ class ExportOptions(ctk.CTkToplevel):
             shade.overrideredirect(True)
             shade.configure(fg_color="#000000")
             shade.attributes("-alpha", 0.42)
-            shade.geometry(f"{editor.winfo_width()}x{editor.winfo_height()}+"
+            # Shade has CTk geometry scaling too; editor bounds are already
+            # physical pixels, so do not multiply the dimmed surface by DPI.
+            shade_scale = shade._get_window_scaling()
+            shade.geometry(f"{round(editor.winfo_width() / shade_scale)}x"
+                           f"{round(editor.winfo_height() / shade_scale)}+"
                            f"{editor.winfo_rootx()}+{editor.winfo_rooty()}")
             shade.lift(editor)
             self.shade = shade
@@ -1099,10 +1143,7 @@ class ExportOptions(ctk.CTkToplevel):
             if self.shade and self.shade.winfo_exists():
                 self.shade.destroy()
             self.shade = None  # platform cannot dim: modal must still work
-        width, height = 530, 575
-        x = editor.winfo_rootx() + max(0, (editor.winfo_width()-width)//2)
-        y = editor.winfo_rooty() + max(0, (editor.winfo_height()-height)//2)
-        self.geometry(f"{width}x{height}+{x}+{y}")
+        place_popup(self, editor, 530, 575)
         self.configure(fg_color="#25282d")
         self.lift(self.shade if self.shade else editor)
 

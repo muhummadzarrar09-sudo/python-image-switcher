@@ -280,7 +280,8 @@ class EditorWindow(ctk.CTkToplevel):
         self._poll_gpu_status()
 
     def _layout_footer(self, event):
-        if event.widget != self.footer:
+        # CTkFrame.bind attaches to its internal Tk canvas, not the frame.
+        if event.widget != self.footer._canvas:
             return
         compact = event.width < 500
         if compact == self._compact_footer:
@@ -296,7 +297,7 @@ class EditorWindow(ctk.CTkToplevel):
             self.footer_view.pack(side="right", padx=5, pady=8)
 
     def _layout_header(self, event):
-        if event.widget != self.header:
+        if event.widget != self.header._canvas:
             return
         show_brand = event.width >= 1100
         if show_brand != self._brand_visible:

@@ -112,7 +112,10 @@ def test_simulated_150_percent_narrow_client_keeps_controls_inside(tk_root):
         assert abs(editor.winfo_height() - 700) <= 3, editor.winfo_height()
         client_right = editor.winfo_rootx() + editor.winfo_width()
         header = editor.header
-        assert editor._header_wrapped
+        assert editor._header_wrapped, (
+            header.winfo_width(), editor._header_left.winfo_reqwidth(),
+            editor._header_right.winfo_reqwidth(), editor._brand_visible,
+            editor._header_left.winfo_width(), editor._header_right.winfo_width())
         assert header.winfo_rootx() + header.winfo_width() <= client_right + 3
         for group in (editor._header_left, editor._header_right):
             for action in group.winfo_children():

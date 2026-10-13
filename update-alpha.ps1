@@ -105,7 +105,9 @@ function Backup-InstalledProjects([string]$editorPath, [string]$backupRoot) {
     # Only files *inside the existing installed application directory* are at
     # risk during setup. User-selected folders elsewhere are never scanned or
     # moved. Backups live outside the install tree and are never overwritten.
-    $installDirectory = Split-Path -Parent $editorPath
+    # Resolve Windows 8.3 aliases (for example RUNNER~1 in %TEMP%) through the
+    # filesystem before comparing lengths to Get-ChildItem's long FullName.
+    $installDirectory = (Get-Item -LiteralPath (Split-Path -Parent $editorPath) -ErrorAction Stop).FullName
     $installFull = [IO.Path]::GetFullPath($installDirectory).TrimEnd([char[]]@('\', '/'))
     $backupFull = [IO.Path]::GetFullPath($backupRoot).TrimEnd([char[]]@('\', '/'))
     if ($backupFull.Equals($installFull, [StringComparison]::OrdinalIgnoreCase) -or
@@ -124,7 +126,10 @@ function Backup-InstalledProjects([string]$editorPath, [string]$backupRoot) {
             if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
                 throw "Cannot safely snapshot a linked project: $($file.FullName)"
             }
-            $relative = $file.FullName.Substring($installDirectory.Length).TrimStart([char[]]@('\', '/'))
+            if (-not $file.FullName.StartsWith($installFull + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "Cannot safely resolve project path under the installation: $($file.FullName)"
+            }
+            $relative = $file.FullName.Substring($installFull.Length).TrimStart([char[]]@('\', '/'))
             $target = Join-Path $snapshot $relative
             New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
             Copy-Item -LiteralPath $file.FullName -Destination $target -ErrorAction Stop

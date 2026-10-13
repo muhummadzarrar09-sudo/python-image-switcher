@@ -21,7 +21,7 @@ from PIL import Image, ImageColor, ImageTk
 
 from .batch import BatchSession, EDIT_FIELDS
 from .gpu_preview import OpenCLPreview, eligible_export
-from .preview import PreviewRenderer, PreviewRequest
+from .preview import PreviewRenderer, PreviewRequest, mask_point, preview_label
 from .render import STILL_EXTENSIONS, edited_size, source_info, still_photo_frames, _open_source
 from .workflow import export_batch, import_project
 from .version import ALPHA_VERSION
@@ -219,7 +219,7 @@ class EditorWindow(ctk.CTkToplevel):
         self.status = ctk.CTkLabel(footer, text="Add still photos to begin", anchor="w",
                                    text_color="#aab0b9", font=ctk.CTkFont(size=11))
         self.status.pack(side="left", padx=15, fill="x", expand=True)
-        ctk.CTkLabel(footer, text="Fit preview · full resolution on export", text_color="#858e9b",
+        ctk.CTkLabel(footer, text="Fit preview · original-size master on export", text_color="#858e9b",
                      font=ctk.CTkFont(size=10)).pack(side="right", padx=(5, 15))
         ctk.CTkSegmentedButton(footer, variable=self.view_mode, values=["Before", "After"],
                                width=138, height=30, selected_color="#205da7",
@@ -663,24 +663,30 @@ class EditorWindow(ctk.CTkToplevel):
             return
         try:
             photo = self.selected_photo()
-            left, top, width, height = self._canvas_bounds
-            if not width or not (left <= event.x < left + width and top <= event.y < top + height):
+            point = mask_point(self._canvas_bounds, event.x, event.y)
+            if point is None:
                 return
-            self.batch.add_mask_stroke(photo.number, (event.x-left)/width, (event.y-top)/height,
-                                       .035, add_background=self.brush_add)
+            self.batch.add_mask_stroke(photo.number, *point, .035, add_background=self.brush_add)
             self.refresh_list()
             self.show_current()
         except Exception as exc:
             self.error(exc)
 
     def on_canvas_resize(self, _event):
+        # Tk has already changed the widget dimensions here, but the old
+        # displayed image bounds still belong to the previous size. Disarm
+        # immediately; a delayed preview alone leaves a 150 ms paint window.
+        self._displayed_generation = -1
+        self._sync_mask_status()
         if self._resize_job:
             self.after_cancel(self._resize_job)
         self._resize_job = self.after(150, self.show_current)
 
     def show_current(self):
         """Schedule the latest canvas-size preview, without blocking Tk."""
-        self._resize_job = None
+        if self._resize_job is not None:
+            self.after_cancel(self._resize_job)
+            self._resize_job = None
         self._preview_generation += 1
         self._sync_mask_status()  # disarm clicks before a new crop/selection/preview starts
         if self._preview_job is not None:
@@ -750,7 +756,7 @@ class EditorWindow(ctk.CTkToplevel):
             self._displayed_generation = self._preview_generation
             self._sync_mask_status()
             state = "Protected" if photo.protected else "Batch"
-            kind = "Source preview" if self.view_mode.get() == "Before" else "Edited preview"
+            kind = preview_label(photo.source, self.view_mode.get() == "Before")
             if gpu_used:
                 kind += " · experimental GPU"
             self.status.configure(text=f"#{photo.number:04d} · {state} · {kind} · {Path(photo.source).name[:28]}")

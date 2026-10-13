@@ -152,6 +152,13 @@ def test_manual_mask_requires_live_after_tool_and_can_undo(tmp_path, tk_root):
         editor.busy = False
         assert editor._sync_mask_status()
         assert "Mask ready" in tool.mask_status.cget("text")
+        editor.on_canvas_resize(SimpleNamespace())
+        editor.paint_mask(click)
+        assert not photo.mask_strokes  # disarmed immediately, before debounce fires
+        assert "Waiting" in tool.mask_status.cget("text")
+        editor.show_current()  # cancels the pending resize job
+        editor._displayed_generation = editor._preview_generation
+        editor._canvas_bounds = (10, 10, 40, 30)
         editor.paint_mask(click)
         assert len(photo.mask_strokes) == 1
         assert "1 stroke" in tool.mask_status.cget("text") or "Waiting" in tool.mask_status.cget("text")

@@ -5,12 +5,32 @@ import threading
 import time
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from src.editor.batch import BatchSession
-from src.editor.preview import PreviewRenderer, PreviewRequest, process_preview
+from src.editor.preview import PreviewRenderer, PreviewRequest, mask_point, preview_label, process_preview
 from scripts.probe_gpu import cpu_pixels
 from src.editor.render import render
+
+
+def test_nef_preview_label_never_claims_full_raw_pixels():
+    assert "may use camera JPEG" in preview_label("photo.NEF", True)
+    assert "may use camera JPEG" in preview_label("photo.NEF", False)
+    assert preview_label("photo.jpg", True) == "Source preview"
+    assert preview_label("photo.png", False) == "Edited preview"
+
+
+@pytest.mark.parametrize("scale", [1, 2, 3])
+def test_mask_coordinate_mapping_ignores_matte_and_is_scale_invariant(scale):
+    # Analogous to 100/125/150% Tk scaling: events and displayed bounds are
+    # measured in the same coordinate system, independent of actual OS DPI.
+    bounds = tuple(v * scale for v in (30, 20, 200, 100))
+    assert mask_point(bounds, 130 * scale, 70 * scale) == (.5, .5)
+    assert mask_point(bounds, 30 * scale, 20 * scale) == (0, 0)
+    for x, y in [(29, 70), (230, 70), (130, 19), (130, 120)]:
+        assert mask_point(bounds, x * scale, y * scale) is None
+    assert mask_point((0, 0, 0, 10), 0, 5) is None
 
 
 def test_preview_is_canvas_size_while_master_is_full_size(tmp_path):

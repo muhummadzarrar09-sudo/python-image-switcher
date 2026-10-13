@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+from pathlib import Path
 from queue import Empty, Full, Queue
 import threading
 
@@ -16,6 +17,25 @@ from PIL import Image
 from .batch import BatchSession, Photo
 from .gpu_preview import OpenCLPreview, eligible
 from .render import _open_source, render
+
+
+def preview_label(source: str, before: bool) -> str:
+    """Avoid claiming a NEF's embedded camera JPEG is the full RAW master."""
+    if Path(source).suffix.lower() == ".nef":
+        return ("NEF source preview" if before else "NEF edited preview") + " · may use camera JPEG"
+    return "Source preview" if before else "Edited preview"
+
+
+def mask_point(bounds: tuple[int, int, int, int], x: int, y: int) -> tuple[float, float] | None:
+    """Map Tk canvas coordinates into the *displayed* image, not the canvas.
+
+    Tk's widget bounds and event coordinates share the same scaling; do not
+    apply another DPI multiplier. Outside the photo matte must never paint.
+    """
+    left, top, width, height = bounds
+    if width <= 0 or height <= 0 or not (left <= x < left + width and top <= y < top + height):
+        return None
+    return ((x - left) / width, (y - top) / height)
 
 
 @dataclass(frozen=True)

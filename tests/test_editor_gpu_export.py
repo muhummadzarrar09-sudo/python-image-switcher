@@ -68,6 +68,47 @@ def test_batch_exports_gpu_eligible_and_cpu_protected_with_pixel_parity(tmp_path
             assert np.array_equal(np.asarray(cpu), np.asarray(actual))
 
 
+def test_421_distinct_generated_photos_keep_protected_numbers_and_bounded_outputs(tmp_path):
+    # Structural >400-photo test with tiny distinct fixtures and a TEST DOUBLE.
+    # This is not a real GPU benchmark or evidence about camera I/O/latency.
+    batch = BatchSession()
+    for index in range(421):
+        source = tmp_path / f"distinct-{index:04d}.png"
+        Image.new("RGB", (20, 16), (index % 256, (index * 3) % 256, (index * 7) % 256)).save(source)
+        photo = batch.add_photo(str(source))
+        if index % 7 == 0:
+            batch.edit_photo(photo.number, "brightness", .1)  # explicit protected CPU route
+    batch.set_batch("exposure", .35)
+    batch.set_batch("contrast", .2)
+    gpu = FakeGPU()
+    output = tmp_path / "full-batch"
+    used_gpu, used_cpu = [], []
+
+    def consume(number, done, total, accelerated):
+        assert total == 421 and number == done
+        photo = batch.get(number)
+        master = output / f"{number:04d}-distinct-{number-1:04d}.png"
+        project = output / f"{number:04d}-distinct-{number-1:04d}.isphoto"
+        assert len(list(output.glob("*.png"))) == 1  # completed pairs never pile up
+        assert len(list(output.glob("*.isphoto"))) == 1
+        expected, _, _ = render(photo, batch)
+        with Image.open(master) as actual:
+            assert np.array_equal(np.asarray(actual), np.asarray(expected))
+        from src.editor.project import read_project
+        assert read_project(str(project)).manifest["protected"] == photo.protected
+        (used_gpu if accelerated else used_cpu).append(number)
+        master.unlink()
+        project.unlink()
+
+    results = export_batch(batch, str(output), accelerator=gpu, on_exported=consume)
+    assert len(results) == 421
+    assert [row[0] for row in results] == list(range(1, 422))
+    assert used_cpu == [number for number in range(1, 422) if (number - 1) % 7 == 0]
+    assert used_gpu == [number for number in range(1, 422) if (number - 1) % 7 != 0]
+    assert gpu.full_calls == len(used_gpu)
+    assert not list(output.iterdir())
+
+
 def test_failed_device_redoes_master_on_cpu_without_partial_output(tmp_path):
     source = tmp_path / "product.jpg"
     Image.new("RGB", (80, 65), (52, 117, 190)).save(source)

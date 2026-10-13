@@ -217,6 +217,10 @@ if ($ProbeTest) {
             Set-Content -LiteralPath (Join-Path $fakeInstall 'test.isbatch') -Value 'session bytes'
             Set-Content -LiteralPath (Join-Path $fakeInstall 'ordinary.txt') -Value 'unrelated'
             $snapshot = Backup-InstalledProjects -editorPath $fakeEditor -backupRoot (Join-Path $probeRoot 'backups')
+            if (-not (Test-Path -LiteralPath (Join-Path $snapshot 'my-edits\test.isphoto'))) {
+                $found = @(Get-ChildItem -LiteralPath $snapshot -Recurse -File | ForEach-Object { $_.FullName })
+                throw "Nested project missing from backup. Found: $($found -join '; ')"
+            }
             if ((Get-Content -LiteralPath (Join-Path $snapshot 'my-edits\test.isphoto') -Raw) -ne
                 (Get-Content -LiteralPath (Join-Path $nested 'test.isphoto') -Raw)) {
                 throw 'Project snapshot bytes differ'

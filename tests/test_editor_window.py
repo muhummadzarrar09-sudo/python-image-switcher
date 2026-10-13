@@ -68,6 +68,31 @@ def test_named_adjustment_sliders_and_export_dialog_do_not_write_early(tmp_path,
             editor.destroy()
 
 
+def test_primary_and_narrow_header_actions_stay_on_screen(tk_root):
+    import customtkinter as ctk
+    from src.editor.window import EditorWindow
+
+    editor = EditorWindow(tk_root)
+    try:
+        for size in ("1456x766", "1000x700"):
+            editor.geometry(size)
+            tk_root.update()
+            left = editor.header.winfo_rootx()
+            right = left + editor.header.winfo_width()
+            actions = [child for child in editor.header.winfo_children()
+                       if isinstance(child, (ctk.CTkButton, ctk.CTkSegmentedButton))]
+            assert len(actions) >= 8
+            for action in actions:
+                assert action.winfo_width() >= 30, (size, action.cget("text") if isinstance(action, ctk.CTkButton) else "scope")
+                assert left - 2 <= action.winfo_rootx()
+                assert action.winfo_rootx() + action.winfo_width() <= right + 2, size
+            assert editor.sidebar.winfo_rootx() + editor.sidebar.winfo_width() <= editor.workspace.winfo_rootx() + 2
+            assert editor.workspace.winfo_rootx() + editor.workspace.winfo_width() <= editor.panel.winfo_rootx() + 2
+            assert editor.canvas.winfo_width() >= 200
+    finally:
+        editor.destroy()
+
+
 def test_background_validation_and_stale_mask_click_are_non_destructive(tmp_path, tk_root):
     from PIL import Image
     from src.editor.window import EditorWindow
@@ -188,6 +213,14 @@ def test_export_escape_closes_without_writing(tmp_path, tk_root):
         editor.select(editor.batch.add_photo(str(source)).number)
         dialog = ExportOptions(editor)
         tk_root.update()
+        # A modal must own the Tk grab rather than leaving editing controls
+        # clickable behind the dimming overlay. On CI the first grab can be
+        # deferred until the native window becomes viewable.
+        deadline = time.monotonic() + 3
+        while dialog.grab_current() != dialog and time.monotonic() < deadline:
+            tk_root.update()
+            time.sleep(.02)
+        assert dialog.grab_current() == dialog
         dialog.folder.set(str(tmp_path / "output"))
         # Windows CI desktops may reject synthetic key events when the runner
         # cannot give a withdrawn-root popup real OS keyboard focus. Verify

@@ -74,7 +74,7 @@ def test_primary_and_narrow_header_actions_stay_on_screen(tk_root):
 
     editor = EditorWindow(tk_root)
     try:
-        for size in ("1456x766", "1000x700"):
+        for size in ("1456x766", "1000x700", "960x640"):
             editor.geometry(size)
             tk_root.update()
             left = editor.header.winfo_rootx()

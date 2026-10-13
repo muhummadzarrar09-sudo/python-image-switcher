@@ -104,8 +104,12 @@ class EditorWindow(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)
         self.title(f"Image Switcher | Still Photo Editor {ALPHA_VERSION}")
-        self.geometry("1456x766")
-        self.minsize(1000, 700)
+        # CTk scales geometry/minsize in logical units. Keep the minimum in
+        # physical pixels across display scales instead of turning a 1000x700
+        # request into an unavoidable 1500x1050 window at 150%.
+        scale = self._get_window_scaling()
+        self.geometry(f"{round(1456 / scale)}x{round(766 / scale)}")
+        self.minsize(round(960 / scale), round(640 / scale))
         self.batch = BatchSession()
         self.session_path: str | None = None
         self.current: int | None = None

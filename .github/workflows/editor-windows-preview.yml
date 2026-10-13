@@ -40,7 +40,9 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force ui-captures\runner | Out-Null
-          & .\.venv\Scripts\python.exe scripts\capture_editor_baseline.py --output ui-captures\runner --wait-ms 500 *> ui-captures\runner\capture.log
+          # Hosted runner exposes only 1024x720 usable pixels. These are
+          # *runner-fitting smoke captures*, not the 1456x766 user baseline.
+          & .\.venv\Scripts\python.exe scripts\capture_editor_baseline.py --window 960x640 --output ui-captures\runner --wait-ms 500 *> ui-captures\runner\capture.log
           if ($LASTEXITCODE -ne 0) {
             $tail = (Get-Content ui-captures\runner\capture.log -Tail 28) -join '%0A'
             Write-Host "::error file=scripts/capture_editor_baseline.py,line=1::$tail"
@@ -49,7 +51,7 @@ jobs:
           & .\.venv\Scripts\python.exe scripts\ui_review.py ui-captures\runner
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force ui-captures\runner\narrow | Out-Null
-          & .\.venv\Scripts\python.exe scripts\capture_editor_baseline.py --window 1000x700 --output ui-captures\runner\narrow --wait-ms 500 *> ui-captures\runner\narrow\capture.log
+          & .\.venv\Scripts\python.exe scripts\capture_editor_baseline.py --window 980x650 --output ui-captures\runner\narrow --wait-ms 500 *> ui-captures\runner\narrow\capture.log
           if ($LASTEXITCODE -ne 0) {
             $tail = (Get-Content ui-captures\runner\narrow\capture.log -Tail 28) -join '%0A'
             Write-Host "::error file=scripts/capture_editor_baseline.py,line=1::$tail"

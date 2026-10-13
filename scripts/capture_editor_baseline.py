@@ -19,11 +19,11 @@ import traceback
 def window_size(value: str) -> tuple[int, int]:
     try:
         width, height = (int(part) for part in value.lower().split("x"))
-        if width < 1000 or height < 700:
+        if width < 960 or height < 640:
             raise ValueError
         return width, height
     except ValueError as exc:
-        raise argparse.ArgumentTypeError("Window size must be WIDTHxHEIGHT, at least 1000x700") from exc
+        raise argparse.ArgumentTypeError("Window size must be WIDTHxHEIGHT, at least 960x640") from exc
 
 
 def bounds(widget) -> dict[str, int]:
@@ -93,7 +93,14 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
     # CTk's geometry API accepts logical units and scales them internally;
     # the comparison viewport is specified in *physical* client pixels.
     scale = editor._get_window_scaling()
-    editor.geometry(f"{round(size[0] / scale)}x{round(size[1] / scale)}")
+    work_area = monitor_work_area(editor)
+    geometry = f"{round(size[0] / scale)}x{round(size[1] / scale)}"
+    if (work_area and work_area["width"] >= size[0] + 16
+            and work_area["height"] >= size[1] + 55):
+        # CTk scales dimensions, not +x+y. Give the OS titlebar and taskbar
+        # room instead of accepting a partially off-screen default placement.
+        geometry += f"+{work_area['x'] + 8}+{work_area['y'] + 8}"
+    editor.geometry(geometry)
     editor.update()
     meta: dict = {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),

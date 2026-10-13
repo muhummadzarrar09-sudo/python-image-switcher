@@ -5,7 +5,7 @@ import json
 import pytest
 from PIL import Image
 
-from scripts.capture_editor_baseline import window_size, dpi_for_window
+from scripts.capture_editor_baseline import window_size, dpi_for_window, monitor_work_area
 from scripts.ui_review import STATES, audit_capture, contrast_ratio, within
 
 
@@ -27,6 +27,7 @@ def test_no_dpi_probe_outside_windows():
     import sys
     if sys.platform != "win32":
         assert dpi_for_window(None) is None
+        assert monitor_work_area(None) is None
 
 
 def test_contrast_ratio_uses_linear_srgb_and_geometry_rejects_overflow():
@@ -62,11 +63,27 @@ def test_capture_audit_reports_actual_bounds_and_never_approves_fixture(tmp_path
         states[name] = state
         Image.new("RGB", (1000, 700)).save(tmp_path / f"{name}.png")
     meta = {"states": states, "fixture_only": True, "background_rejection": "Would be upscaled",
-            "requested_window": {"width": 1000, "height": 700}, "dpi_for_window": 96}
+            "requested_window": {"width": 1000, "height": 700}, "dpi_for_window": 96,
+            "monitor_work_area": {"x": 0, "y": 0, "width": 1200, "height": 900}}
     (tmp_path / "capture.json").write_text(json.dumps(meta), encoding="utf-8")
     report = audit_capture(tmp_path)
     assert report["passed"] and not report["approved_reference"] and report["fixture_only"]
+    assert report["screen_fit_verified"]
     assert report["measured"]["populated-editor"]["workspace_width"] == 530
+    meta["requested_window"]["width"] = 1500  # DPI minsize must not silently change the requested test
+    (tmp_path / "capture.json").write_text(json.dumps(meta), encoding="utf-8")
+    report = audit_capture(tmp_path)
+    assert not report["passed"]
+    assert "Requested physical client size is actually honored" in [
+        x["check"] for x in report["checks"] if not x["passed"]]
+    meta["requested_window"]["width"] = 1000
+    meta["monitor_work_area"]["height"] = 600
+    (tmp_path / "capture.json").write_text(json.dumps(meta), encoding="utf-8")
+    report = audit_capture(tmp_path)
+    assert not report["passed"]
+    assert "Editor remains inside monitor working area" in [
+        x["check"] for x in report["checks"] if not x["passed"]]
+    meta["monitor_work_area"]["height"] = 900
     states["populated-editor"]["panel"] = {"x": 950, "y": 68, "width": 306, "height": 652}
     (tmp_path / "capture.json").write_text(json.dumps(meta), encoding="utf-8")
     report = audit_capture(tmp_path)

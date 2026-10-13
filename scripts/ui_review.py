@@ -97,6 +97,19 @@ def audit_capture(directory: Path) -> dict:
                           "canvas_inset_left": state["canvas"]["x"] - workspace["x"],
                           "popup_pixels": ([popup["width"], popup["height"]] if popup else None)}
     states = meta["states"]
+    requested = meta.get("requested_window", {})
+    check("Requested physical client size is actually honored",
+          bool(states) and all(
+              abs(state["editor_client"][axis] - requested.get(axis, -100000)) <= 3
+              for state in states.values() for axis in ("width", "height")))
+    work_area = meta.get("monitor_work_area")
+    if work_area is not None:
+        check("Editor remains inside monitor working area",
+              all(within(state["editor_client"], work_area, tolerance=3)
+                  for state in states.values()))
+        check("Popups remain inside monitor working area",
+              all(within(state["popup"], work_area, tolerance=3)
+                  for state in states.values() if state.get("popup")))
     check("Empty state has no selected photo", states.get("empty-editor", {}).get("selected_number") is None)
     check("Fixture has stable selected #0001", states.get("populated-editor", {}).get("selected_number") == 1)
     check("Missing source is a separate numbered correctable state",
@@ -115,9 +128,11 @@ def audit_capture(directory: Path) -> dict:
     return {"passed": all(item["passed"] for item in checks),
             "fixture_only": meta.get("fixture_only"),
             "approved_reference": False,
-            "note": "Geometry/fixture smoke checks only. User-approved reference and real Windows 11 DPI review still required.",
+            "note": "Geometry/fixture smoke checks only. Capture may be forced larger by the editor's DPI-scaled minimum. User-approved reference and physical visibility review still required.",
             "capture_dpi_for_window": meta.get("dpi_for_window"),
-            "requested_window": meta.get("requested_window"),
+            "requested_window": requested,
+            "monitor_work_area": work_area,
+            "screen_fit_verified": work_area is not None,
             "measured": measures, "contrast_of_current_tokens": contrast, "checks": checks}
 
 
@@ -131,7 +146,11 @@ def main() -> None:
     print(f"{len(report['checks']) - len(failed)}/{len(report['checks'])} capture/contrast checks passed; "
           f"approved reference: no")
     if failed:
-        parser.exit(1, "Failed: " + "; ".join(failed) + "\n")
+        requested = report["requested_window"]
+        measured = report["measured"].get("empty-editor", {}).get("client_pixels")
+        details = (f" Requested {requested.get('width')}x{requested.get('height')} physical pixels; "
+                   f"captured {measured}. Monitor work area: {report['monitor_work_area']}.")
+        parser.exit(1, "Failed: " + "; ".join(failed) + "." + details + "\n")
 
 
 if __name__ == "__main__":

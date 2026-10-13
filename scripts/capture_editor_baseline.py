@@ -41,6 +41,35 @@ def dpi_for_window(widget) -> int | None:
         return None  # older Windows versions do not expose GetDpiForWindow
 
 
+def monitor_work_area(widget) -> dict[str, int] | None:
+    """Win32 visible work area for this window, excluding taskbar/docked bars."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = (("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                        ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD))
+
+        user32 = ctypes.windll.user32
+        user32.MonitorFromWindow.argtypes = (wintypes.HWND, wintypes.DWORD)
+        user32.MonitorFromWindow.restype = wintypes.HMONITOR
+        user32.GetMonitorInfoW.argtypes = (wintypes.HMONITOR, ctypes.POINTER(MONITORINFO))
+        user32.GetMonitorInfoW.restype = wintypes.BOOL
+        monitor = user32.MonitorFromWindow(widget.winfo_id(), 2)  # nearest monitor
+        info = MONITORINFO()
+        info.cbSize = ctypes.sizeof(info)
+        if not monitor or not user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+            return None
+        area = info.rcWork
+        return {"x": area.left, "y": area.top,
+                "width": area.right - area.left, "height": area.bottom - area.top}
+    except (AttributeError, OSError, ValueError):
+        return None
+
+
 def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -> None:
     if sys.platform != "win32":
         raise RuntimeError("Capture the baseline on Windows 11, not in Linux CI")
@@ -71,6 +100,7 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
         "platform": platform.platform(),
         "requested_window": {"width": size[0], "height": size[1]},
         "dpi_for_window": dpi_for_window(editor),
+        "monitor_work_area": monitor_work_area(editor),
         "tk_pixels_per_point": float(root.tk.call("tk", "scaling")),
         "ctk_window_scaling": float(editor._get_window_scaling()),
         "source_names": [p.name for p in photos],  # never store full private source paths

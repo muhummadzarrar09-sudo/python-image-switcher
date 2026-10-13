@@ -12,12 +12,13 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 from time import perf_counter
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -55,6 +56,8 @@ def main() -> None:
     parser.add_argument("--size", default="2400x1600")
     parser.add_argument("--write-exports", action="store_true",
                         help="also time real temporary PNG/.isphoto exports on CPU and GPU; uses disk space")
+    parser.add_argument("--distinct", action="store_true",
+                        help="make each numbered source a different generated JPG (still NOT camera-photo I/O)")
     args = parser.parse_args()
     try:
         width, height = (int(x) for x in args.size.lower().split("x"))
@@ -72,12 +75,45 @@ def main() -> None:
               "as it goes. Ctrl+C once to cancel and let temporary cleanup finish.",
               file=sys.stderr, flush=True)
     with tempfile.TemporaryDirectory(prefix="image-switcher-batch-gpu-") as directory:
-        path = Path(directory) / "generated.jpg"
-        with Image.open(ROOT / "tests/fixtures/ui-camera.jpg") as original:
-            original.resize((width, height), Image.Resampling.BICUBIC).save(path, quality=92)
         batch = BatchSession()
-        for _ in range(args.count):
-            batch.add_photo(str(path))
+        source_stems: dict[int, str] = {}
+        source_hashes: set[bytes] = set()
+        with Image.open(ROOT / "tests/fixtures/ui-camera.jpg") as original:
+            base = original.convert("RGB").resize((width, height), Image.Resampling.BICUBIC)
+        if args.distinct:
+            print("Generating different JPG bytes for each numbered fixture; these are "
+                  "synthetic variations, not different real camera photos. Sources "
+                  "remain in the temporary folder until the run finishes.",
+                  file=sys.stderr, flush=True)
+            for index in range(args.count):
+                path = Path(directory) / f"generated-{index + 1:04d}.jpg"
+                variant = base.copy()
+                patch = (min(64, width), min(64, height))
+                ImageDraw.Draw(variant).rectangle((0, 0, patch[0]-1, patch[1]-1),
+                                                  fill=((index * 47) % 256,
+                                                        (index * 101) % 256,
+                                                        (index * 173) % 256))
+                try:
+                    with path.open("wb") as output:
+                        variant.save(output, format="JPEG", quality=92)
+                finally:
+                    variant.close()
+                photo = batch.add_photo(str(path))
+                source_stems[photo.number] = path.stem
+                source_hashes.add(hashlib.sha256(path.read_bytes()).digest())
+                if index == 0 and path.stat().st_size * args.count > shutil.disk_usage(directory).free // 3:
+                    raise SystemExit("Not enough temporary disk for distinct generated JPGs; "
+                                     "lower --count or --size before retrying")
+                _progress("Generated distinct JPG sources", index + 1, args.count)
+        else:
+            path = Path(directory) / "generated.jpg"
+            with path.open("wb") as output:
+                base.save(output, format="JPEG", quality=92)
+            source_hashes.add(hashlib.sha256(path.read_bytes()).digest())
+            for _ in range(args.count):
+                photo = batch.add_photo(str(path))
+                source_stems[photo.number] = path.stem
+        base.close()
         batch.set_batch("exposure", .35)
         batch.set_batch("contrast", .2)
         cpu_seconds, gpu_seconds = [], []
@@ -110,7 +146,7 @@ def main() -> None:
 
             def on_cpu_export(number, done, total, _used_gpu):
                 started = perf_counter()
-                cpu_master_hashes[number] = _consume_master(cpu_dir, number, path.stem)
+                cpu_master_hashes[number] = _consume_master(cpu_dir, number, source_stems[number])
                 _progress("CPU PNG/.isphoto exports", done, total)
                 cpu_validation_seconds[0] += perf_counter() - started
 
@@ -125,7 +161,7 @@ def main() -> None:
                 started = perf_counter()
                 if used_gpu:
                     gpu_export_numbers.append(number)
-                if _consume_master(gpu_dir, number, path.stem) != cpu_master_hashes[number]:
+                if _consume_master(gpu_dir, number, source_stems[number]) != cpu_master_hashes[number]:
                     mismatched_numbers.append(number)
                 _progress("GPU-path PNG/.isphoto exports", done, total)
                 gpu_validation_seconds[0] += perf_counter() - started
@@ -144,7 +180,9 @@ def main() -> None:
                                    "are deleted after verification to bound temporary disk use. "
                                    "Sequential passes have different disk cache conditions."}
         peak = peak_memory_bytes()
-        report = {"fixture": "repeated generated JPG bytes as distinct numbered entries",
+        report = {"fixture": ("distinct synthetic JPG variations; not different camera photos"
+                              if args.distinct else "repeated generated JPG bytes as distinct numbered entries"),
+                  "distinct_source_hash_count": len(source_hashes),
                   "count": args.count, "size": [width, height],
                   "gpu_device": accelerator.device_name, "gpu_executed_for_all": gpu_used,
                   "gpu_full_render_count": render_gpu_calls,

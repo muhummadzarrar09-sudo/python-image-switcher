@@ -138,7 +138,8 @@ def test_byte_complete_recipe_preflight_rejects_mismatching_gpu():
     assert backend._parity[(.35, .2)] is False
 
 
-def test_full_export_benchmark_measures_numbered_masters(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("distinct", [False, True])
+def test_full_export_benchmark_measures_numbered_masters(tmp_path, monkeypatch, capsys, distinct):
     from scripts import benchmark_gpu_batch
 
     monkeypatch.setattr(benchmark_gpu_batch, "OpenCLPreview", FakeGPU)
@@ -153,8 +154,10 @@ def test_full_export_benchmark_measures_numbered_masters(tmp_path, monkeypatch, 
         return real_consume(directory, number, source_stem)
 
     monkeypatch.setattr(benchmark_gpu_batch, "_consume_master", check_bounded_files)
-    monkeypatch.setattr(sys, "argv", ["benchmark_gpu_batch.py", "--count", "3",
-                                  "--size", "320x240", "--write-exports"])
+    args = ["benchmark_gpu_batch.py", "--count", "3", "--size", "320x240", "--write-exports"]
+    if distinct:
+        args.append("--distinct")
+    monkeypatch.setattr(sys, "argv", args)
     benchmark_gpu_batch.main()
     output = capsys.readouterr()
     report = json.loads(output.out)
@@ -163,6 +166,10 @@ def test_full_export_benchmark_measures_numbered_masters(tmp_path, monkeypatch, 
     assert consumed == [("cpu-exports", n) for n in (1, 2, 3)] + [
         ("gpu-exports", n) for n in (1, 2, 3)]
     assert report["count"] == 3
+    assert report["distinct_source_hash_count"] == (3 if distinct else 1)
+    assert ("distinct synthetic" in report["fixture"]) == distinct
+    if distinct:
+        assert "Generated distinct JPG sources: 3/3 complete" in output.err
     assert report["gpu_full_render_count"] == 3
     assert report["all_pixel_hashes_match"]
     assert report["full_export"]["gpu_adjusted_photo_numbers"] == [1, 2, 3]

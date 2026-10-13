@@ -6,7 +6,7 @@ import pytest
 from PIL import Image
 
 from scripts.capture_editor_baseline import window_size, dpi_for_window, monitor_work_area
-from scripts.ui_review import STATES, audit_capture, contrast_ratio, within
+from scripts.ui_review import STATES, audit_capture, contrast_ratio, within, main as review_main
 
 
 @pytest.mark.parametrize("text,expected", [("1456x766", (1456, 766)),
@@ -39,7 +39,7 @@ def test_contrast_ratio_uses_linear_srgb_and_geometry_rejects_overflow():
     assert not within({"x": 90, "y": 30, "width": 40, "height": 30}, outer)
 
 
-def test_capture_audit_reports_actual_bounds_and_never_approves_fixture(tmp_path):
+def test_capture_audit_reports_actual_bounds_and_never_approves_fixture(tmp_path, monkeypatch, capsys):
     client = {"x": 10, "y": 20, "width": 1000, "height": 700}
     header = {"x": 10, "y": 20, "width": 1000, "height": 48}
     rail = {"x": 10, "y": 68, "width": 164, "height": 652}
@@ -108,3 +108,8 @@ def test_capture_audit_reports_actual_bounds_and_never_approves_fixture(tmp_path
     report = audit_capture(tmp_path)
     assert not report["passed"]
     assert "populated-editor panel inside client" in [x["check"] for x in report["checks"] if not x["passed"]]
+    monkeypatch.setattr("sys.argv", ["ui_review.py", str(tmp_path)])
+    with pytest.raises(SystemExit) as exc:
+        review_main()
+    assert exc.value.code == 1
+    assert "Empty-state physical bounds: client=" in capsys.readouterr().err

@@ -159,6 +159,11 @@ def main() -> None:
         measured = report["measured"].get("empty-editor", {}).get("client_pixels")
         details = (f" Requested {requested.get('width')}x{requested.get('height')} physical pixels; "
                    f"captured {measured}. Monitor work area: {report['monitor_work_area']}.")
+        if any("panel inside client" in item for item in failed):
+            first = json.loads((args.directory / "capture.json").read_text(encoding="utf-8"))["states"].get("empty-editor", {})
+            details += (f" Empty-state physical bounds: client={first.get('editor_client')}, "
+                        f"rail={first.get('sidebar')}, workspace={first.get('workspace')}, "
+                        f"panel={first.get('panel')}.")
         message = "Failed: " + "; ".join(failed) + "." + details
         if os.environ.get("GITHUB_ACTIONS") == "true":
             # Artifact download uses GitHub's external blob host. Surface the

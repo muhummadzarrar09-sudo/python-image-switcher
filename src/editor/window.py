@@ -150,36 +150,43 @@ class EditorWindow(ctk.CTkToplevel):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
-        # Single compact chrome row; every action here is a working command.
-        # Keep its width bounded at the 1000px minimum instead of placing a
-        # second full-width toolbar between the photo and the title.
+        # Two groups share one row on roomy displays and stack on narrow/high
+        # DPI clients. Never let Tk's packer silently collapse an action.
         header = self.header = self.toolbar = ctk.CTkFrame(
             self, height=48, fg_color="#1c1e22", corner_radius=0)
         header.grid(row=0, column=0, columnspan=3, sticky="ew")
         header.grid_propagate(False)
-        ctk.CTkLabel(header, text="IS", width=29, height=29, fg_color="#19539a",
+        header_left = ctk.CTkFrame(header, height=48, fg_color="transparent")
+        header_right = ctk.CTkFrame(header, height=48, fg_color="transparent")
+        header_left.pack(side="left")
+        header_right.pack(side="right")
+        ctk.CTkLabel(header_left, text="IS", width=29, height=29, fg_color="#19539a",
                      corner_radius=5, font=ctk.CTkFont(size=14, weight="bold")).pack(
                          side="left", padx=(10, 7), pady=8)
-        ctk.CTkLabel(header, text="Image Switcher", text_color="#f3f5f9",
+        ctk.CTkLabel(header_left, text="Image Switcher", text_color="#f3f5f9",
                      font=ctk.CTkFont(size=15, weight="bold")).pack(side="left", padx=(0, 8))
         for text, width, action in (("Add", 56, self.add_files), ("Open", 56, self.open_session),
                                     ("Save", 56, self.save_session), ("Project", 67, self.open_project),
                                     ("Crop", 56, self.open_crop_tools),
                                     ("Background", 91, self.open_background_tools)):
-            ctk.CTkButton(header, text=text, command=action, height=30, width=width,
+            ctk.CTkButton(header_left, text=text, command=action, height=30, width=width,
                           fg_color="#30343a", hover_color="#424b56", corner_radius=5,
                           font=ctk.CTkFont(size=11)).pack(side="left", padx=2, pady=8)
-        ctk.CTkButton(header, text="Export", width=104, height=32, fg_color="#2468b9",
+        ctk.CTkButton(header_right, text="Export", width=104, height=32, fg_color="#2468b9",
                       hover_color="#337dd2", command=self.export).pack(side="right", padx=(3, 10))
-        ctk.CTkSegmentedButton(header, variable=self.scope, values=["Selected", "Batch"],
+        ctk.CTkSegmentedButton(header_right, variable=self.scope, values=["Selected", "Batch"],
                                width=130, height=30, selected_color="#205da7",
                                selected_hover_color="#286cbe", command=lambda _: self.sync_sliders()).pack(
                                    side="right", padx=(2, 6))
-        ctk.CTkLabel(header, text="Scope", text_color="#abb3bd",
+        ctk.CTkLabel(header_right, text="Scope", text_color="#abb3bd",
                      font=ctk.CTkFont(size=11)).pack(side="right", padx=3)
-        ctk.CTkButton(header, text="Unlock", command=self.unlock, width=64, height=30,
+        ctk.CTkButton(header_right, text="Unlock", command=self.unlock, width=64, height=30,
                       fg_color="#30343a", hover_color="#424b56",
                       font=ctk.CTkFont(size=11)).pack(side="right", padx=3)
+        self._header_left = header_left
+        self._header_right = header_right
+        self._header_wrapped = False
+        header.bind("<Configure>", self._layout_header)
 
         sidebar = self.sidebar = ctk.CTkFrame(self, width=164, fg_color="#1f2227", corner_radius=0)
         sidebar.grid(row=1, column=0, sticky="nsew")
@@ -254,6 +261,24 @@ class EditorWindow(ctk.CTkToplevel):
         self.refresh_list()
         self.show_current()
         self._poll_gpu_status()
+
+    def _layout_header(self, event):
+        if event.widget != self.header:
+            return
+        needed = self._header_left.winfo_reqwidth() + self._header_right.winfo_reqwidth() + 8
+        wrap = event.width < needed
+        if wrap == self._header_wrapped:
+            return
+        self._header_wrapped = wrap
+        self._header_left.pack_forget()
+        self._header_right.pack_forget()
+        if wrap:
+            self._header_left.pack(side="top", anchor="w")
+            self._header_right.pack(side="top", anchor="e")
+        else:
+            self._header_left.pack(side="left")
+            self._header_right.pack(side="right")
+        self.header.configure(height=96 if wrap else 48)
 
     def _poll_gpu_status(self):
         status = self._preview_renderer.gpu_status

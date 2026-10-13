@@ -254,7 +254,9 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
                 widget = getattr(editor, key, None)
                 if widget:
                     state[key] = bounds(widget)
-            state["header_actions"] = [bounds(widget) for widget in editor.header.winfo_children()
+            state["header_actions"] = [bounds(widget)
+                                       for group in (editor._header_left, editor._header_right)
+                                       for widget in group.winfo_children()
                                        if isinstance(widget, (ctk.CTkButton, ctk.CTkSegmentedButton))]
             popup = popups.get(name)
             if popup and popup.winfo_exists():

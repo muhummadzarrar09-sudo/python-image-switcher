@@ -25,6 +25,7 @@ def test_named_adjustment_sliders_and_export_dialog_do_not_write_early(tmp_path,
         # Concept-derived layout: one working action row, then three adjacent
         # surfaces, not a second toolbar consuming canvas height.
         assert editor.header.winfo_height() <= 55
+        assert not editor._header_wrapped
         assert editor.sidebar.winfo_rooty() == editor.workspace.winfo_rooty()
         assert editor.workspace.winfo_rooty() == editor.panel.winfo_rooty()
         assert editor.sidebar.winfo_width() <= 185
@@ -79,7 +80,8 @@ def test_primary_and_narrow_header_actions_stay_on_screen(tk_root):
             tk_root.update()
             left = editor.header.winfo_rootx()
             right = left + editor.header.winfo_width()
-            actions = [child for child in editor.header.winfo_children()
+            actions = [child for group in (editor._header_left, editor._header_right)
+                       for child in group.winfo_children()
                        if isinstance(child, (ctk.CTkButton, ctk.CTkSegmentedButton))]
             assert len(actions) >= 8
             for action in actions:

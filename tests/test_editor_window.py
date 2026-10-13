@@ -90,8 +90,10 @@ def test_background_validation_and_stale_mask_click_are_non_destructive(tmp_path
         editor.batch.set_rotation(photo.number, 90)
         editor.set_background("image", source=str(large))
         assert photo.background["mode"] == "image"
-        editor.mask_painting = True
+        editor.open_background_tools()
+        assert editor.background_window and editor.background_window.winfo_exists()
         editor._canvas_bounds = (10, 10, 40, 30)
+        editor._displayed_number = photo.number
         editor._displayed_generation = editor._preview_generation - 1
         editor.paint_mask(SimpleNamespace(x=20, y=20))
         assert not photo.mask_strokes  # preview geometry is stale after the edit
@@ -105,6 +107,63 @@ def test_background_validation_and_stale_mask_click_are_non_destructive(tmp_path
         with pytest.raises(ValueError, match="16-bit NEF"):
             editor.set_background("color", color="#123456")
         assert not raw_photo.background and not raw_photo.protected
+    finally:
+        editor.destroy()
+
+
+def test_manual_mask_requires_live_after_tool_and_can_undo(tmp_path, tk_root):
+    from PIL import Image
+    from src.editor.window import EditorWindow
+
+    source = tmp_path / "subject.jpg"
+    Image.new("RGB", (64, 48), "blue").save(source)
+    editor = EditorWindow(tk_root)
+    try:
+        tk_root.update()
+        photo = editor.batch.add_photo(str(source))
+        editor.select(photo.number)
+        # Clearing a blank mask must not unexpectedly exclude a batch photo.
+        editor.clear_mask()
+        editor.set_background("none")
+        assert not photo.protected
+        editor.open_background_tools()
+        tool = editor.background_window
+        click = SimpleNamespace(x=20, y=20)
+        editor._canvas_bounds = (10, 10, 40, 30)
+        editor._displayed_number = photo.number
+        editor._displayed_generation = editor._preview_generation
+        editor.paint_mask(click)
+        assert not photo.mask_strokes
+        assert "Choose a background effect" in tool.mask_status.cget("text")
+        editor.set_background("color", color="#123456")
+        assert photo.protected
+        assert "Waiting" in tool.mask_status.cget("text")
+        editor._displayed_generation = editor._preview_generation
+        editor._canvas_bounds = (10, 10, 40, 30)
+        editor.view_mode.set("Before")
+        editor.paint_mask(click)
+        assert not photo.mask_strokes
+        assert "Select After" in tool.mask_status.cget("text")
+        editor.view_mode.set("After")
+        editor.busy = True
+        editor.paint_mask(click)
+        assert not photo.mask_strokes
+        assert "Wait" in tool.mask_status.cget("text")
+        editor.busy = False
+        assert editor._sync_mask_status()
+        assert "Mask ready" in tool.mask_status.cget("text")
+        editor.paint_mask(click)
+        assert len(photo.mask_strokes) == 1
+        assert "1 stroke" in tool.mask_status.cget("text") or "Waiting" in tool.mask_status.cget("text")
+        editor.undo_mask_stroke()
+        assert photo.mask_strokes == []
+        editor.close_background_tools()
+        editor._displayed_generation = editor._preview_generation
+        editor._canvas_bounds = (10, 10, 40, 30)
+        editor.paint_mask(click)
+        assert photo.mask_strokes == [] and not editor.mask_painting
+        assert editor.canvas.cget("cursor") == ""
+        assert photo.protected  # manual background stays protected and in batch
     finally:
         editor.destroy()
 

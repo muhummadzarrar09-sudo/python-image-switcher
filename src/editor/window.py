@@ -567,7 +567,7 @@ class EditorWindow(ctk.CTkToplevel):
             else:
                 self.background_window = BackgroundTools(self)
                 self.mask_painting = True
-                self.canvas.configure(cursor="crosshair")
+            self._sync_mask_status()
         except Exception as exc:
             self.error(exc)
 
@@ -577,6 +577,37 @@ class EditorWindow(ctk.CTkToplevel):
         if self.background_window and self.background_window.winfo_exists():
             self.background_window.destroy()
         self.background_window = None
+
+    def _mask_state(self) -> tuple[bool, str]:
+        """Painting is armed only for the current, valid After image and tool."""
+        if (not self.mask_painting or not self.background_window
+                or not self.background_window.winfo_exists()):
+            return False, "Open Background to edit the manual mask."
+        if self.busy or self.importing:
+            return False, "Wait for the current operation to finish."
+        try:
+            photo = self.selected_photo()
+        except (ValueError, KeyError):
+            return False, "Choose a numbered photo first."
+        if not Path(photo.source).is_file():
+            return False, "Source photo is missing; restore it before painting."
+        if self.view_mode.get() != "After":
+            return False, "Select After to paint the manual mask."
+        if not photo.background:
+            return False, "Choose a background effect before painting."
+        if (self._displayed_number != photo.number
+                or self._displayed_generation != self._preview_generation
+                or not self._canvas_bounds[2] or not self._canvas_bounds[3]):
+            return False, "Waiting for this photo's updated preview…"
+        return True, f"Mask ready · {len(photo.mask_strokes)} stroke(s). Click photo to paint; Erase corrects mistakes."
+
+    def _sync_mask_status(self):
+        ready, text = self._mask_state()
+        self.canvas.configure(cursor="crosshair" if ready else "")
+        if self.background_window and self.background_window.winfo_exists():
+            self.background_window.mask_status.configure(text=text,
+                                                          text_color="#a7d6ff" if ready else "#d2b889")
+        return ready
 
     def set_background(self, mode: str, *, color: str = "#ffffff", source: str | None = None):
         photo = self.selected_photo()
@@ -601,6 +632,9 @@ class EditorWindow(ctk.CTkToplevel):
             settings = {}
         else:
             raise ValueError("Unknown background mode")
+        if settings == photo.background:
+            self._sync_mask_status()
+            return  # choosing the existing mode is not a new protected edit
         self.batch.protect(photo.number)
         photo.background = settings
         self.refresh_list()
@@ -608,21 +642,27 @@ class EditorWindow(ctk.CTkToplevel):
 
     def clear_mask(self):
         photo = self.selected_photo()
+        if not photo.mask_strokes:
+            return  # an empty mask is not a per-photo edit or a protection change
         self.batch.protect(photo.number)
         photo.mask_strokes.clear()
         self.refresh_list()
         self.show_current()
 
+    def undo_mask_stroke(self):
+        photo = self.selected_photo()
+        if not photo.mask_strokes:
+            return
+        photo.mask_strokes.pop()
+        self.show_current()
+
     def paint_mask(self, event):
         # A pending crop, rotation, resize or selection invalidates the old
         # displayed rectangle. Never map clicks through stale image bounds.
-        if (not self.mask_painting or self.current is None or self.view_mode.get() != "After"
-                or self._displayed_generation != self._preview_generation):
+        if not self._sync_mask_status():
             return
         try:
             photo = self.selected_photo()
-            if not photo.background:
-                return
             left, top, width, height = self._canvas_bounds
             if not width or not (left <= event.x < left + width and top <= event.y < top + height):
                 return
@@ -642,6 +682,7 @@ class EditorWindow(ctk.CTkToplevel):
         """Schedule the latest canvas-size preview, without blocking Tk."""
         self._resize_job = None
         self._preview_generation += 1
+        self._sync_mask_status()  # disarm clicks before a new crop/selection/preview starts
         if self._preview_job is not None:
             self.after_cancel(self._preview_job)
             self._preview_job = None
@@ -707,6 +748,7 @@ class EditorWindow(ctk.CTkToplevel):
             photo = self.selected_photo()
             self._displayed_number = photo.number
             self._displayed_generation = self._preview_generation
+            self._sync_mask_status()
             state = "Protected" if photo.protected else "Batch"
             kind = "Source preview" if self.view_mode.get() == "Before" else "Edited preview"
             if gpu_used:
@@ -718,6 +760,7 @@ class EditorWindow(ctk.CTkToplevel):
     def _show_preview_error(self, error: str):
         self._displayed_generation = -1
         self._canvas_bounds = (0, 0, 0, 0)
+        self._sync_mask_status()
         self.canvas.delete("all")
         self.canvas.create_text(10, 20, anchor="nw", fill="orange", text=error[:105])
         self.status.configure(text=f"Preview failed: {error[:80]}")
@@ -804,6 +847,7 @@ class EditorWindow(ctk.CTkToplevel):
         self.batch.rights = dict(rights)
         snapshot = deepcopy(self.batch)
         self.busy = True
+        self._sync_mask_status()
         self._export_directory = directory
         count = len(snapshot.photos) if numbers is None else len(numbers)
         self.status.configure(text=f"Exporting 0/{count} numbered photos, including protected edits…")
@@ -884,11 +928,13 @@ class EditorWindow(ctk.CTkToplevel):
 
     def done(self, message):
         self.busy = False
+        self._sync_mask_status()
         self.status.configure(text=message)
         messagebox.showinfo("Export complete", message, parent=self)
 
     def failed(self, exc):
         self.busy = False
+        self._sync_mask_status()
         self.error(exc)
 
 
@@ -898,10 +944,12 @@ class CropTools(ctk.CTkToplevel):
         super().__init__(editor)
         self.editor = editor
         self.title("Crop / orientation")
-        self.geometry("350x260")
+        self.geometry("375x305")
         self.resizable(False, False)
         self.transient(editor)
+        self.configure(fg_color="#25282d")
         self.protocol("WM_DELETE_WINDOW", editor.close_crop_tools)
+        self.bind("<Escape>", lambda _event: editor.close_crop_tools())
         photo = editor.selected_photo()
         ctk.CTkLabel(self, text=f"Photo #{photo.number:04d} — crop / orientation",
                      font=ctk.CTkFont(weight="bold")).pack(pady=(12, 6))
@@ -913,6 +961,8 @@ class CropTools(ctk.CTkToplevel):
         ctk.CTkButton(self, text="Apply crop", command=lambda: editor.apply_crop(self.crop.get())).pack(pady=4)
         ctk.CTkButton(self, text="Rotate 90° left", command=editor.rotate).pack(pady=4)
         ctk.CTkButton(self, text="Flip horizontally", command=editor.flip).pack(pady=4)
+        ctk.CTkButton(self, text="Close", fg_color="#3c444e",
+                      command=editor.close_crop_tools).pack(pady=(8, 4))
 
 
 class BackgroundTools(ctk.CTkToplevel):
@@ -921,10 +971,12 @@ class BackgroundTools(ctk.CTkToplevel):
         super().__init__(editor)
         self.editor = editor
         self.title("Background / manual mask")
-        self.geometry("390x375")
+        self.geometry("410x435")
         self.resizable(False, False)
         self.transient(editor)
+        self.configure(fg_color="#25282d")
         self.protocol("WM_DELETE_WINDOW", editor.close_background_tools)
+        self.bind("<Escape>", lambda _event: editor.close_background_tools())
         photo = editor.selected_photo()
         ctk.CTkLabel(self, text=f"Photo #{photo.number:04d} — background",
                      font=ctk.CTkFont(weight="bold")).pack(pady=(12, 6))
@@ -939,10 +991,20 @@ class BackgroundTools(ctk.CTkToplevel):
         ctk.CTkOptionMenu(self, variable=self.brush, width=300,
                           values=["Paint background", "Erase from mask"],
                           command=lambda value: setattr(editor, "brush_add", value == "Paint background")).pack(pady=8)
-        ctk.CTkButton(self, text="Clear mask strokes", fg_color="#555", command=editor.clear_mask).pack(pady=4)
-        ctk.CTkLabel(self, text="Select After, then click the photo to paint.\n"
-                     "Erase corrects mistakes; no automatic selection yet.",
-                     text_color="#bbb", justify="center").pack(pady=6)
+        mask_actions = ctk.CTkFrame(self, fg_color="transparent")
+        mask_actions.pack(pady=4)
+        ctk.CTkButton(mask_actions, text="Undo last stroke", width=135, fg_color="#3c444e",
+                      command=editor.undo_mask_stroke).pack(side="left", padx=4)
+        ctk.CTkButton(mask_actions, text="Clear mask", width=120, fg_color="#3c444e",
+                      command=editor.clear_mask).pack(side="left", padx=4)
+        self.mask_status = ctk.CTkLabel(self, text="Choose a background effect before painting.",
+                                        wraplength=360, text_color="#d2b889", justify="center")
+        self.mask_status.pack(padx=15, pady=(6, 2))
+        ctk.CTkLabel(self, text="Manual mask only · no automatic subject selection.\n"
+                     "Closing this tool stops painting; edits remain in the batch.",
+                     text_color="#b3bdc9", justify="center").pack(pady=(0, 5))
+        ctk.CTkButton(self, text="Close tool", width=120, fg_color="#3c444e",
+                      command=editor.close_background_tools).pack(pady=(0, 8))
 
     def choose_mode(self, mode: str):
         try:

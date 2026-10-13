@@ -47,7 +47,7 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
     # invocation puts scripts/ rather than the repository root on sys.path.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     import customtkinter as ctk
-    from PIL import ImageGrab
+    from PIL import Image, ImageGrab
     from src.editor.render import source_info
     from src.editor.window import EditorWindow, ExportOptions
 
@@ -106,6 +106,35 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
         editor.open_background_tools()
         popups["background-tools"] = editor.background_window
 
+    def background_before():
+        editor.view_mode.set("Before")
+        editor.show_current()
+        popups["background-before"] = editor.background_window
+
+    def background_rejected():
+        editor.view_mode.set("After")
+        editor.show_current()
+        # Use a generated, undersized still; rejecting it must not alter the
+        # numbered photo or claim an upscaled export is lossless.
+        small = output / "undersized-replacement.png"
+        Image.new("RGB", (8, 8), "#26405c").save(small)
+        before = dict(editor.selected_photo().background)
+        try:
+            editor.set_background("image", source=str(small))
+        except ValueError as exc:
+            meta["background_rejection"] = str(exc)
+            editor.status.configure(text=f"Replacement rejected: {exc}")
+        else:
+            raise AssertionError("Undersized background was accepted")
+        finally:
+            small.unlink(missing_ok=True)
+        assert editor.selected_photo().background == before
+        popups["background-rejected"] = editor.background_window
+
+    def background_ready():
+        editor.set_background("color", color="#26405c")
+        popups["background-ready"] = editor.background_window
+
     def export():
         nonlocal dialog
         editor.close_background_tools()
@@ -114,7 +143,9 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
 
     states.extend([("empty-editor", lambda: None), ("populated-editor", populate),
                    ("protected-batch", protect), ("crop-tools", crop),
-                   ("background-tools", background), ("export-overlay", export)])
+                   ("background-tools", background), ("background-before", background_before),
+                   ("background-rejected", background_rejected),
+                   ("background-ready", background_ready), ("export-overlay", export)])
 
     def save_metadata():
         (output / "capture.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
@@ -149,6 +180,9 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
                      "selected_number": editor.current,
                      "protected_numbers": editor.batch.excluded_numbers,
                      "scope": editor.scope.get()}
+            if editor.background_window and editor.background_window.winfo_exists():
+                state["mask_status"] = editor.background_window.mask_status.cget("text")
+                state["background_mode"] = editor.selected_photo().background.get("mode", "none")
             for key in ("header", "toolbar", "sidebar", "workspace", "panel", "canvas"):
                 widget = getattr(editor, key, None)
                 if widget:

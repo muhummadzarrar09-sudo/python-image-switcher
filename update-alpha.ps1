@@ -101,6 +101,48 @@ function Find-InstalledEditor {
     return $null
 }
 
+function Backup-InstalledProjects([string]$editorPath, [string]$backupRoot) {
+    # Only files *inside the existing installed application directory* are at
+    # risk during setup. User-selected folders elsewhere are never scanned or
+    # moved. Backups live outside the install tree and are never overwritten.
+    $installDirectory = Split-Path -Parent $editorPath
+    $installFull = [IO.Path]::GetFullPath($installDirectory).TrimEnd([char[]]@('\', '/'))
+    $backupFull = [IO.Path]::GetFullPath($backupRoot).TrimEnd([char[]]@('\', '/'))
+    if ($backupFull.Equals($installFull, [StringComparison]::OrdinalIgnoreCase) -or
+        $backupFull.StartsWith($installFull + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Update stopped: backup destination must be outside the installed application folder.'
+    }
+    $files = @(Get-ChildItem -LiteralPath $installDirectory -Recurse -File -ErrorAction Stop |
+               Where-Object { $_.Extension -in @('.isphoto', '.isbatch') })
+    if ($files.Count -eq 0) {
+        Write-Host 'No .isphoto/.isbatch files inside the installation; no in-place backup needed.'
+        return $null
+    }
+    $snapshot = Join-Path $backupRoot ("pre-update-{0}-{1}" -f (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ'), [guid]::NewGuid().ToString('N'))
+    try {
+        foreach ($file in $files) {
+            if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Cannot safely snapshot a linked project: $($file.FullName)"
+            }
+            $relative = $file.FullName.Substring($installDirectory.Length).TrimStart([char[]]@('\', '/'))
+            $target = Join-Path $snapshot $relative
+            New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+            Copy-Item -LiteralPath $file.FullName -Destination $target -ErrorAction Stop
+            if ((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash -ne
+                (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash) {
+                throw "Backup verification failed for $($file.FullName)"
+            }
+        }
+    } catch {
+        if (Test-Path -LiteralPath $snapshot) {
+            try { Remove-Item -LiteralPath $snapshot -Recurse -Force } catch { Write-Warning "Incomplete backup at $snapshot needs manual review." }
+        }
+        throw "Update stopped before setup because the project/session backup failed: $($_.Exception.Message)"
+    }
+    Write-Host "Snapshot of $($files.Count) installed project/session file(s): $snapshot"
+    return $snapshot
+}
+
 if ($GpuReport) {
     # Resolve the installed app by its actual location (including custom Inno
     # install paths), not a hardcoded LocalAppData guess. No build or install.
@@ -163,7 +205,39 @@ if ($ProbeTest) {
                 if (Test-Path $probeRoot) { Remove-Item -LiteralPath $probeRoot -Recurse -Force }
             }
         }
-        Write-Host 'Missing-runtime and per-user compiler probes handled safely.'
+        # Test the backup routine without an installer or private user data.
+        $probeRoot = Join-Path $env:TEMP ('image-switcher-backup-probe-' + [guid]::NewGuid().ToString('N'))
+        try {
+            $fakeInstall = Join-Path $probeRoot 'installed'
+            $nested = Join-Path $fakeInstall 'my-edits'
+            New-Item -ItemType Directory -Path $nested -Force | Out-Null
+            $fakeEditor = Join-Path $fakeInstall 'ImageSwitcherEditor.exe'
+            Set-Content -LiteralPath $fakeEditor -Value 'fake binary'
+            Set-Content -LiteralPath (Join-Path $nested 'test.isphoto') -Value 'project bytes'
+            Set-Content -LiteralPath (Join-Path $fakeInstall 'test.isbatch') -Value 'session bytes'
+            Set-Content -LiteralPath (Join-Path $fakeInstall 'ordinary.txt') -Value 'unrelated'
+            $snapshot = Backup-InstalledProjects -editorPath $fakeEditor -backupRoot (Join-Path $probeRoot 'backups')
+            if ((Get-Content -LiteralPath (Join-Path $snapshot 'my-edits\test.isphoto') -Raw) -ne
+                (Get-Content -LiteralPath (Join-Path $nested 'test.isphoto') -Raw)) {
+                throw 'Project snapshot bytes differ'
+            }
+            if ((Get-Content -LiteralPath (Join-Path $snapshot 'test.isbatch') -Raw) -ne
+                (Get-Content -LiteralPath (Join-Path $fakeInstall 'test.isbatch') -Raw)) {
+                throw 'Session snapshot bytes differ'
+            }
+            if (Test-Path -LiteralPath (Join-Path $snapshot 'ordinary.txt')) {
+                throw 'Unrelated installation file was backed up'
+            }
+            try {
+                Backup-InstalledProjects -editorPath $fakeEditor -backupRoot (Join-Path $fakeInstall 'backups') | Out-Null
+                throw 'Backup unexpectedly allowed inside the installation folder'
+            } catch {
+                if ($_.Exception.Message -notmatch 'outside the installed application') { throw }
+            }
+        } finally {
+            if (Test-Path -LiteralPath $probeRoot) { Remove-Item -LiteralPath $probeRoot -Recurse -Force }
+        }
+        Write-Host 'Missing-runtime, per-user compiler and scoped project-backup probes passed.'
         # Actions' PowerShell wrapper exits with LASTEXITCODE even if a failed
         # native probe was intentional and this script returned normally.
         $global:LASTEXITCODE = 0
@@ -237,6 +311,11 @@ try {
     $setup = Join-Path $root 'dist\ImageSwitcher-Setup-0.2.0-alpha.7.exe'
     if (-not (Test-Path $setup)) { throw "Alpha setup was not produced: $setup" }
     if ($installedBefore) {
+        # Snapshot user-created projects/sessions *under the installed app* to
+        # a separate user-data directory; abort before running setup on any
+        # read/copy/checksum failure. External exports stay where the user put
+        # them and are not needlessly duplicated.
+        $snapshot = Backup-InstalledProjects -editorPath $installedBefore -backupRoot (Join-Path $env:LOCALAPPDATA 'Image Switcher\UpdateBackups')
         # The stable Inno AppId reuses the prior directory/uninstaller. /SILENT
         # shows progress but avoids a second first-install wizard.
         Write-Host 'Updating your existing Image Switcher Alpha in place...'
@@ -249,7 +328,8 @@ try {
         $smoke = Start-Process -FilePath $installedAfter -ArgumentList '--editor-self-test' -Wait -PassThru
         if ($smoke.ExitCode -ne 0) { throw "Updated editor verification failed: $($smoke.ExitCode)" }
         Write-Host "UPDATED in place to 0.2.0-alpha.7: $installedAfter"
-        Write-Host 'Your originals, exported projects and .isbatch sessions were not touched.'
+        if ($snapshot) { Write-Host "Verified pre-update project/session backup: $snapshot" }
+        Write-Host 'Your originals and files stored outside the installation were not touched.'
     } else {
         Write-Warning 'The alpha setup is UNSIGNED and not validated on a clean Windows 11 machine. Continue only if you trust this checkout.'
         $process = Start-Process -FilePath $setup -Wait -PassThru

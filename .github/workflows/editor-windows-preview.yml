@@ -97,11 +97,33 @@ jobs:
           $directory = Join-Path $env:LOCALAPPDATA 'Programs\Image Switcher'
           $editor = Join-Path $directory 'ImageSwitcherEditor.exe'
           if (-not (Test-Path $editor)) { throw "Installed editor not found: $editor" }
+          # Synthetic user saves placed *inside* the install tree verify that
+          # the real updater snapshots them outside it before silent setup.
+          $testProject = Join-Path $directory 'ci-user.isphoto'
+          $testSession = Join-Path $directory 'ci-user.isbatch'
+          Set-Content -LiteralPath $testProject -Value 'synthetic project bytes'
+          Set-Content -LiteralPath $testSession -Value 'synthetic session bytes'
+          $projectHash = (Get-FileHash -LiteralPath $testProject -Algorithm SHA256).Hash
+          $sessionHash = (Get-FileHash -LiteralPath $testSession -Algorithm SHA256).Hash
           # Exercise the actual updater's existing-installation branch; it must
           # update in place rather than launching another first-install wizard.
           & .\update-alpha.ps1
           if ($LASTEXITCODE -ne 0) { throw "In-place updater failed: $LASTEXITCODE" }
           if (-not (Test-Path $editor)) { throw "Updated editor moved or disappeared: $editor" }
+          $backupRoot = Join-Path $env:LOCALAPPDATA 'Image Switcher\UpdateBackups'
+          $snapshot = Get-ChildItem -LiteralPath $backupRoot -Directory |
+                      Sort-Object CreationTimeUtc -Descending | Select-Object -First 1
+          if (-not $snapshot) { throw 'Pre-update backup of synthetic project/session was not created' }
+          foreach ($pair in @(@('ci-user.isphoto', $projectHash), @('ci-user.isbatch', $sessionHash))) {
+            $original = Join-Path $directory $pair[0]
+            $saved = Join-Path $snapshot.FullName $pair[0]
+            if (-not (Test-Path -LiteralPath $saved) -or
+                (Get-FileHash -LiteralPath $saved -Algorithm SHA256).Hash -ne $pair[1] -or
+                (Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash -ne $pair[1]) {
+              throw "Update changed or failed to snapshot user data: $($pair[0])"
+            }
+          }
+          Remove-Item -LiteralPath $testProject, $testSession -Force
           $process = Start-Process -FilePath $editor -ArgumentList '--editor-self-test' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installed editor smoke test failed: $($process.ExitCode)" }
           $report = Join-Path (Resolve-Path 'ui-captures\runner').Path 'installed-gpu-report.json'

@@ -12,6 +12,7 @@ import json
 import platform
 from pathlib import Path
 import sys
+import time
 import traceback
 
 
@@ -162,7 +163,8 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
         try:
             setup()
             editor.update_idletasks()
-            editor.after(wait_ms, lambda: screenshot(index, name))
+            deadline = time.monotonic() + max(10, wait_ms / 1000 + 8)
+            editor.after(wait_ms, lambda: screenshot(index, name, deadline))
         except Exception:
             traceback.print_exc()
             meta["error"] = f"Failed to prepare {name}"
@@ -170,8 +172,16 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
             root.destroy()
             raise
 
-    def screenshot(index: int, name: str):
+    def screenshot(index: int, name: str, deadline: float):
         try:
+            # Screenshot only a completed current preview. An arbitrary timer
+            # could otherwise capture a stale photo or "Rendering preview…"
+            # under a slower driver/NEF decoder and still report success.
+            if editor.current is not None and editor._displayed_generation != editor._preview_generation:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(f"Timed out waiting for {name} preview")
+                editor.after(100, lambda: screenshot(index, name, deadline))
+                return
             rect = bounds(editor)  # Tk client-area coordinates; titlebar/taskbar excluded
             bbox = (rect["x"], rect["y"], rect["x"] + rect["width"], rect["y"] + rect["height"])
             image = ImageGrab.grab(bbox=bbox, all_screens=True)

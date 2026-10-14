@@ -250,10 +250,18 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
             if editor.background_window and editor.background_window.winfo_exists():
                 state["mask_status"] = editor.background_window.mask_status.cget("text")
                 state["background_mode"] = editor.selected_photo().background.get("mode", "none")
-            for key in ("header", "toolbar", "sidebar", "workspace", "panel", "canvas"):
+            for key in ("header", "toolbar", "sidebar", "workspace", "canvas"):
                 widget = getattr(editor, key, None)
                 if widget:
                     state[key] = bounds(widget)
+            # CTkScrollableFrame itself is the virtual scrolling *content*,
+            # not the panel visible in the editor grid. At high DPI the content
+            # extends below its viewport by design; measuring it as the panel
+            # falsely reports an off-client adjustment rail.
+            state["panel"] = bounds(editor.panel._parent_frame)
+            state["panel_content"] = bounds(editor.panel)
+            state["panel_scroll_viewport"] = bounds(editor.panel._parent_canvas)
+            state["panel_yview"] = list(editor.panel._parent_canvas.yview())
             state["header_actions"] = [bounds(widget)
                                        for group in (editor._header_left, editor._header_right)
                                        for widget in group.winfo_children()

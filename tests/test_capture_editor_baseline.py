@@ -50,7 +50,9 @@ def test_capture_audit_reports_actual_bounds_and_never_approves_fixture(tmp_path
     for name in STATES:
         state = {"editor_client": client, "image_pixels": [1000, 700],
                  "header": header, "sidebar": rail, "workspace": workspace,
-                 "panel": panel, "canvas": canvas,
+                 "panel": panel, "panel_content": panel.copy(),
+                 "panel_scroll_viewport": panel.copy(), "panel_yview": [0, 1],
+                 "canvas": canvas,
                  "selected_number": None if name == "empty-editor" else 3 if name == "missing-source" else 1,
                  "source_missing": name == "missing-source",
                  "protected_numbers": [1] if name != "empty-editor" else []}
@@ -69,9 +71,18 @@ def test_capture_audit_reports_actual_bounds_and_never_approves_fixture(tmp_path
     (tmp_path / "capture.json").write_text(json.dumps(meta), encoding="utf-8")
     report = audit_capture(tmp_path)
     assert report["passed"] and not report["approved_reference"] and report["fixture_only"]
-    assert report["screen_fit_verified"]
+    assert report["screen_fit_verified"] and report["panel_viewport_verified"]
     assert not report["header_actions_verified"]  # legacy captures lack button bounds
     assert report["measured"]["populated-editor"]["workspace_width"] == 530
+    states["populated-editor"]["panel_content"] = {**panel, "height": 900}
+    (tmp_path / "capture.json").write_text(json.dumps(meta), encoding="utf-8")
+    assert "populated-editor overflowing adjustments can scroll" in [
+        x["check"] for x in audit_capture(tmp_path)["checks"] if not x["passed"]]
+    states["populated-editor"]["panel_yview"] = [0, .7]
+    (tmp_path / "capture.json").write_text(json.dumps(meta), encoding="utf-8")
+    assert audit_capture(tmp_path)["passed"]
+    states["populated-editor"]["panel_content"] = panel.copy()
+    states["populated-editor"]["panel_yview"] = [0, 1]
     states["populated-editor"]["header_actions"] = [
         {"x": 20 + i * 80, "y": 25, "width": 55, "height": 30} for i in range(8)]
     (tmp_path / "capture.json").write_text(json.dumps(meta), encoding="utf-8")
@@ -113,3 +124,15 @@ def test_capture_audit_reports_actual_bounds_and_never_approves_fixture(tmp_path
         review_main()
     assert exc.value.code == 1
     assert "Empty-state physical bounds: client=" in capsys.readouterr().err
+
+    # Older 150% captures measured virtual content taller than its visible
+    # rail. Do not call that off-screen, but require a fresh viewport capture.
+    states["populated-editor"]["panel"] = panel
+    for state in states.values():
+        state["panel"] = {**panel, "height": 800}
+        del state["panel_content"], state["panel_scroll_viewport"], state["panel_yview"]
+    (tmp_path / "capture.json").write_text(json.dumps(meta), encoding="utf-8")
+    legacy = audit_capture(tmp_path)
+    assert not legacy["passed"] and not legacy["panel_viewport_verified"]
+    assert [x["check"] for x in legacy["checks"] if not x["passed"]] == [
+        "Visible adjustment viewport measured"]

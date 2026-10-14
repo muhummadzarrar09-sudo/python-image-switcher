@@ -74,8 +74,26 @@ def audit_capture(directory: Path) -> dict:
         client = state["editor_client"]
         check(f"{name} screenshot matches measured client", list(pixels) == state["image_pixels"]
               and all(abs(a - b) <= 3 for a, b in zip(pixels, (client["width"], client["height"]))))
-        for section in ("header", "sidebar", "workspace", "panel"):
+        for section in ("header", "sidebar", "workspace"):
             check(f"{name} {section} inside client", within(state[section], client))
+        panel = state["panel"]
+        if "panel_content" in state:
+            check(f"{name} panel inside client", within(panel, client))
+            viewport = state["panel_scroll_viewport"]
+            check(f"{name} adjustment viewport inside panel", within(viewport, panel))
+            check(f"{name} adjustment content fits viewport width",
+                  state["panel_content"]["width"] <= viewport["width"] + 3)
+            if state["panel_content"]["height"] > viewport["height"] + 3:
+                check(f"{name} overflowing adjustments can scroll",
+                      len(state.get("panel_yview", [])) == 2
+                      and state["panel_yview"][1] < .995)
+        else:
+            # Pre-fix captures called the CTkScrollableFrame's virtual content
+            # the panel. Its height can legitimately exceed the client; only
+            # horizontal placement can be assessed without viewport metadata.
+            check(f"{name} legacy panel horizontal bounds inside client",
+                  panel["width"] > 0 and client["x"] - 3 <= panel["x"]
+                  and panel["x"] + panel["width"] <= client["x"] + client["width"] + 3)
         if "header_actions" in state:
             check(f"{name} header actions are visible", len(state["header_actions"]) >= 8
                   and all(action["width"] >= 30 and within(action, state["header"], tolerance=2)
@@ -99,10 +117,17 @@ def audit_capture(directory: Path) -> dict:
         measures[name] = {"client_pixels": list(pixels),
                           "rail_width": sidebar["width"], "workspace_width": workspace["width"],
                           "adjustments_width": panel["width"],
+                          "adjustments_viewport_height": (state["panel_scroll_viewport"]["height"]
+                                                          if "panel_scroll_viewport" in state else None),
+                          "adjustments_content_height": (state["panel_content"]["height"]
+                                                         if "panel_content" in state else None),
                           "header_height": state["header"]["height"],
                           "canvas_inset_left": state["canvas"]["x"] - workspace["x"],
                           "popup_pixels": ([popup["width"], popup["height"]] if popup else None)}
     states = meta["states"]
+    check("Visible adjustment viewport measured",
+          bool(states) and all("panel_content" in s and "panel_scroll_viewport" in s
+                               for s in states.values()))
     requested = meta.get("requested_window", {})
     check("Requested physical client size is actually honored",
           bool(states) and all(
@@ -136,12 +161,14 @@ def audit_capture(directory: Path) -> dict:
     return {"passed": all(item["passed"] for item in checks),
             "fixture_only": meta.get("fixture_only"),
             "approved_reference": False,
-            "note": "Geometry/fixture smoke checks only. Capture may be forced larger by the editor's DPI-scaled minimum. User-approved reference and physical visibility review still required.",
+            "note": "Geometry/fixture smoke checks only. Older captures do not measure the visible scrollable panel viewport. User-approved reference and physical visibility review still required.",
             "capture_dpi_for_window": meta.get("dpi_for_window"),
             "requested_window": requested,
             "monitor_work_area": work_area,
             "screen_fit_verified": work_area is not None,
             "header_actions_verified": bool(states) and all("header_actions" in s for s in states.values()),
+            "panel_viewport_verified": bool(states) and all("panel_content" in s and
+                                                            "panel_scroll_viewport" in s for s in states.values()),
             "measured": measures, "contrast_of_current_tokens": contrast, "checks": checks}
 
 

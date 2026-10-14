@@ -58,6 +58,10 @@ def audit_capture(directory: Path, expected_dpi: int | None = None) -> dict:
         checks.append({"check": name, "passed": bool(condition)})
 
     check("No capture script error", not meta.get("error"))
+    captured_expectation = meta.get("expected_dpi_for_window")
+    if captured_expectation is not None:
+        check(f"Capture window DPI matches required {captured_expectation}",
+              meta.get("dpi_for_window") == captured_expectation)
     if expected_dpi is not None:
         check(f"Window DPI matches expected {expected_dpi}", meta.get("dpi_for_window") == expected_dpi)
     check("All expected states captured", set(STATES) <= set(meta["states"]))
@@ -166,6 +170,7 @@ def audit_capture(directory: Path, expected_dpi: int | None = None) -> dict:
             "note": "Geometry/fixture smoke checks only. Older captures do not measure the visible scrollable panel viewport. User-approved reference and physical visibility review still required.",
             "capture_dpi_for_window": meta.get("dpi_for_window"),
             "expected_dpi_for_window": expected_dpi,
+            "capture_required_dpi_for_window": captured_expectation,
             "requested_window": requested,
             "monitor_work_area": work_area,
             "screen_fit_verified": work_area is not None,

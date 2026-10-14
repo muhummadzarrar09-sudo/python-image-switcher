@@ -26,6 +26,16 @@ def window_size(value: str) -> tuple[int, int]:
         raise argparse.ArgumentTypeError("Window size must be WIDTHxHEIGHT, at least 960x640") from exc
 
 
+def require_window_dpi(actual: int | None, expected: int | None) -> None:
+    """Fail before recording ten misleading states on the wrong display scale."""
+    if expected is not None and actual != expected:
+        raise RuntimeError(
+            f"Window DPI is {actual}, expected {expected}. Move the editor to the intended monitor, "
+            "set that monitor's Windows Display scale, then launch a NEW capture process. "
+            "96=100%, 120=125%, 144=150%. No screenshots were taken."
+        )
+
+
 def bounds(widget) -> dict[str, int]:
     return {"x": widget.winfo_rootx(), "y": widget.winfo_rooty(),
             "width": widget.winfo_width(), "height": widget.winfo_height()}
@@ -70,7 +80,8 @@ def monitor_work_area(widget) -> dict[str, int] | None:
         return None
 
 
-def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -> None:
+def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int,
+        expected_dpi: int | None = None) -> None:
     if sys.platform != "win32":
         raise RuntimeError("Capture the baseline on Windows 11, not in Linux CI")
     # Delay desktop imports until after platform and CLI checks. Direct script
@@ -102,11 +113,19 @@ def run(photos: list[Path], output: Path, size: tuple[int, int], wait_ms: int) -
         geometry += f"+{work_area['x'] + 8}+{work_area['y'] + 8}"
     editor.geometry(geometry)
     editor.update()
+    actual_dpi = dpi_for_window(editor)
+    try:
+        require_window_dpi(actual_dpi, expected_dpi)
+    except RuntimeError:
+        editor.destroy()
+        root.destroy()
+        raise
     meta: dict = {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "platform": platform.platform(),
         "requested_window": {"width": size[0], "height": size[1]},
-        "dpi_for_window": dpi_for_window(editor),
+        "dpi_for_window": actual_dpi,
+        "expected_dpi_for_window": expected_dpi,
         "monitor_probe_attempted": True,
         "monitor_work_area": monitor_work_area(editor),
         "tk_pixels_per_point": float(root.tk.call("tk", "scaling")),
@@ -300,13 +319,18 @@ def main() -> None:
                         help="Ignored local directory for screenshots and measurement JSON")
     parser.add_argument("--window", type=window_size, default=(1456, 766),
                         help="Target Tk client dimensions WIDTHxHEIGHT (default 1456x766)")
+    parser.add_argument("--expected-dpi", type=int,
+                        help="Abort before screenshots unless the editor window reports this DPI "
+                             "(96=100%%, 120=125%%, 144=150%%)")
     parser.add_argument("--wait-ms", type=int, default=900,
                         help="Delay after each state before screenshot (at least 300 ms)")
     args = parser.parse_args()
     if args.wait_ms < 300:
         parser.error("--wait-ms must be at least 300")
+    if args.expected_dpi is not None and not 1 <= args.expected_dpi <= 960:
+        parser.error("--expected-dpi must be a positive DPI value up to 960")
     photos = args.photo or [Path(__file__).resolve().parents[1] / "tests/fixtures/ui-camera.jpg"]
-    run(photos, args.output, args.window, args.wait_ms)
+    run(photos, args.output, args.window, args.wait_ms, args.expected_dpi)
 
 
 if __name__ == "__main__":

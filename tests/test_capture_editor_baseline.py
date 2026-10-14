@@ -5,7 +5,7 @@ import json
 import pytest
 from PIL import Image
 
-from scripts.capture_editor_baseline import window_size, dpi_for_window, monitor_work_area
+from scripts.capture_editor_baseline import window_size, dpi_for_window, monitor_work_area, require_window_dpi
 from scripts.ui_review import STATES, audit_capture, contrast_ratio, within, main as review_main
 
 
@@ -22,6 +22,15 @@ def test_window_size(text, expected):
 def test_window_size_rejects_invalid_sizes(text):
     with pytest.raises(argparse.ArgumentTypeError):
         window_size(text)
+
+
+def test_expected_dpi_preflight_rejects_wrong_or_unknown_scaling():
+    require_window_dpi(144, 144)
+    require_window_dpi(96, None)  # unscoped smoke capture
+    with pytest.raises(RuntimeError, match="Window DPI is 96, expected 144.*No screenshots"):
+        require_window_dpi(96, 144)
+    with pytest.raises(RuntimeError, match="Window DPI is None, expected 120"):
+        require_window_dpi(None, 120)
 
 
 def test_no_dpi_probe_outside_windows():
@@ -76,6 +85,12 @@ def test_capture_audit_reports_actual_bounds_and_never_approves_fixture(tmp_path
     assert not wrong_dpi["passed"]
     assert "Window DPI matches expected 120" in [
         x["check"] for x in wrong_dpi["checks"] if not x["passed"]]
+    meta["expected_dpi_for_window"] = 120
+    (tmp_path / "capture.json").write_text(json.dumps(meta), encoding="utf-8")
+    assert "Capture window DPI matches required 120" in [
+        x["check"] for x in audit_capture(tmp_path)["checks"] if not x["passed"]]
+    del meta["expected_dpi_for_window"]
+    (tmp_path / "capture.json").write_text(json.dumps(meta), encoding="utf-8")
     assert report["screen_fit_verified"] and report["panel_viewport_verified"]
     assert not report["header_actions_verified"]  # legacy captures lack button bounds
     assert report["measured"]["populated-editor"]["workspace_width"] == 530

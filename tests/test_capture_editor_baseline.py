@@ -69,8 +69,13 @@ def test_capture_audit_reports_actual_bounds_and_never_approves_fixture(tmp_path
             "requested_window": {"width": 1000, "height": 700}, "dpi_for_window": 96,
             "monitor_work_area": {"x": 0, "y": 0, "width": 1200, "height": 900}}
     (tmp_path / "capture.json").write_text(json.dumps(meta), encoding="utf-8")
-    report = audit_capture(tmp_path)
+    report = audit_capture(tmp_path, expected_dpi=96)
     assert report["passed"] and not report["approved_reference"] and report["fixture_only"]
+    assert report["expected_dpi_for_window"] == 96
+    wrong_dpi = audit_capture(tmp_path, expected_dpi=120)
+    assert not wrong_dpi["passed"]
+    assert "Window DPI matches expected 120" in [
+        x["check"] for x in wrong_dpi["checks"] if not x["passed"]]
     assert report["screen_fit_verified"] and report["panel_viewport_verified"]
     assert not report["header_actions_verified"]  # legacy captures lack button bounds
     assert report["measured"]["populated-editor"]["workspace_width"] == 530

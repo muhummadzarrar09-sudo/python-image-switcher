@@ -48,7 +48,7 @@ jobs:
             Write-Host "::error file=scripts/capture_editor_baseline.py,line=1::$tail"
             exit 1
           }
-          & .\.venv\Scripts\python.exe scripts\ui_review.py ui-captures\runner
+          & .\.venv\Scripts\python.exe scripts\ui_review.py ui-captures\runner --expected-dpi 96
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force ui-captures\runner\narrow | Out-Null
           & .\.venv\Scripts\python.exe scripts\capture_editor_baseline.py --window 980x650 --output ui-captures\runner\narrow --wait-ms 500 *> ui-captures\runner\narrow\capture.log
@@ -57,7 +57,7 @@ jobs:
             Write-Host "::error file=scripts/capture_editor_baseline.py,line=1::$tail"
             exit 1
           }
-          & .\.venv\Scripts\python.exe scripts\ui_review.py ui-captures\runner\narrow
+          & .\.venv\Scripts\python.exe scripts\ui_review.py ui-captures\runner\narrow --expected-dpi 96
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Profile generated 421-photo import and peak RAM (diagnostic)
         shell: pwsh

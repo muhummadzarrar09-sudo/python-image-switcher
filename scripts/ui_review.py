@@ -50,7 +50,7 @@ def within(inner: dict, outer: dict, tolerance: int = 3) -> bool:
             and inner["y"] + inner["height"] <= outer["y"] + outer["height"] + tolerance)
 
 
-def audit_capture(directory: Path) -> dict:
+def audit_capture(directory: Path, expected_dpi: int | None = None) -> dict:
     meta = json.loads((directory / "capture.json").read_text(encoding="utf-8"))
     checks: list[dict] = []
 
@@ -58,6 +58,8 @@ def audit_capture(directory: Path) -> dict:
         checks.append({"check": name, "passed": bool(condition)})
 
     check("No capture script error", not meta.get("error"))
+    if expected_dpi is not None:
+        check(f"Window DPI matches expected {expected_dpi}", meta.get("dpi_for_window") == expected_dpi)
     check("All expected states captured", set(STATES) <= set(meta["states"]))
     measures: dict = {}
     for name in STATES:
@@ -163,6 +165,7 @@ def audit_capture(directory: Path) -> dict:
             "approved_reference": False,
             "note": "Geometry/fixture smoke checks only. Older captures do not measure the visible scrollable panel viewport. User-approved reference and physical visibility review still required.",
             "capture_dpi_for_window": meta.get("dpi_for_window"),
+            "expected_dpi_for_window": expected_dpi,
             "requested_window": requested,
             "monitor_work_area": work_area,
             "screen_fit_verified": work_area is not None,
@@ -175,12 +178,18 @@ def audit_capture(directory: Path) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=Path, help="Folder containing capture.json and state PNGs")
+    parser.add_argument("--expected-dpi", type=int,
+                        help="Required effective GetDpiForWindow value: 96=100%%, 120=125%%, 144=150%%")
     args = parser.parse_args()
-    report = audit_capture(args.directory)
+    if args.expected_dpi is not None and not 1 <= args.expected_dpi <= 960:
+        parser.error("--expected-dpi must be a positive DPI value up to 960")
+    report = audit_capture(args.directory, expected_dpi=args.expected_dpi)
     (args.directory / "review.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     failed = [item["check"] for item in report["checks"] if not item["passed"]]
     print(f"{len(report['checks']) - len(failed)}/{len(report['checks'])} capture/contrast checks passed; "
-          f"approved reference: no")
+          f"window DPI: {report['capture_dpi_for_window']}"
+          + (f" (required: {args.expected_dpi})" if args.expected_dpi is not None else " (not checked)")
+          + "; approved reference: no")
     if failed:
         requested = report["requested_window"]
         measured = report["measured"].get("empty-editor", {}).get("client_pixels")

@@ -244,6 +244,55 @@ def test_manual_mask_requires_live_after_tool_and_can_undo(tmp_path, tk_root):
         editor.destroy()
 
 
+def test_tool_escape_from_focused_children_closes_without_mutating_edits(tmp_path, tk_root):
+    """Escape works from native entry/canvas controls, not only the popup frame."""
+    from PIL import Image
+    import customtkinter as ctk
+    from src.editor.window import EditorWindow
+
+    source = tmp_path / "subject.jpg"
+    Image.new("RGB", (64, 48), "blue").save(source)
+    editor = EditorWindow(tk_root)
+    try:
+        tk_root.update()
+        photo = editor.batch.add_photo(str(source))
+        editor.select(photo.number)
+        editor.open_crop_tools()
+        crop = editor.crop_window
+        assert crop is not None
+        crop.crop.insert(0, "5,5,90,90")  # unsubmitted draft must not apply
+        crop_tag = crop._escape_tag
+        assert crop.bind_class(crop_tag, "<Escape>")
+        assert crop_tag in crop.crop._entry.bindtags()
+        crop_buttons = [w for w in crop.winfo_children() if isinstance(w, ctk.CTkButton)]
+        assert crop_buttons and crop_tag in crop_buttons[0]._canvas.bindtags()
+        tk_root.update()  # map the tool before dispatching a synthetic key event
+        crop.crop._entry.event_generate("<Escape>", when="tail")
+        tk_root.update()
+        assert editor.crop_window is None and photo.crop is None
+        assert not editor.bind_class(crop_tag, "<Escape>")  # no leaked global binding
+
+        editor.open_background_tools()
+        background = editor.background_window
+        assert background is not None
+        editor.mask_painting = True
+        background.color.delete(0, "end")
+        background.color.insert(0, "#ff0000")
+        background_tag = background._escape_tag
+        assert background_tag != crop_tag
+        assert background_tag in background.color._entry.bindtags()
+        assert background.bind_class(background_tag, "<Escape>")
+        tk_root.update()
+        background.color._entry.event_generate("<Escape>", when="tail")
+        tk_root.update()
+        assert editor.background_window is None and not editor.mask_painting
+        assert editor.canvas.cget("cursor") == ""
+        assert not photo.background and not photo.protected  # draft was discarded
+        assert not editor.bind_class(background_tag, "<Escape>")
+    finally:
+        editor.destroy()
+
+
 def test_missing_source_is_correctable_without_losing_number_or_edits(tmp_path, tk_root):
     from PIL import Image
     from src.editor.window import EditorWindow

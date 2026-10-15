@@ -1023,7 +1023,37 @@ class EditorWindow(ctk.CTkToplevel):
         self.error(exc)
 
 
-class CropTools(ctk.CTkToplevel):
+class _EscapeClosableTool(ctk.CTkToplevel):
+    """Make Escape reach native entries and CTk canvas-backed child controls."""
+
+    def _install_escape(self, close):
+        # A Toplevel binding is not inherited by focused entry/button widgets.
+        # Scope the class binding to this window only; never bind_all globally.
+        self._escape_tag = f"ImageSwitcherToolEscape{id(self)}"
+        self._escape_close = close
+        self.bind_class(self._escape_tag, "<Escape>", self._close_on_escape)
+
+        def tag_tree(widget):
+            widget.bindtags((self._escape_tag, *widget.bindtags()))
+            for child in widget.winfo_children():
+                tag_tree(child)
+
+        tag_tree(self)
+
+    def _close_on_escape(self, _event):
+        self._escape_close()
+        return "break"
+
+    def destroy(self):
+        # The parent editor may destroy a tool without using its Close action.
+        tag = getattr(self, "_escape_tag", None)
+        if tag:
+            self.unbind_class(tag, "<Escape>")
+            self._escape_tag = None
+        super().destroy()
+
+
+class CropTools(_EscapeClosableTool):
     """Non-export editing tools, separate from the adjustment sliders."""
     def __init__(self, editor: EditorWindow):
         super().__init__(editor)
@@ -1034,7 +1064,6 @@ class CropTools(ctk.CTkToplevel):
         self.transient(editor)
         self.configure(fg_color="#25282d")
         self.protocol("WM_DELETE_WINDOW", editor.close_crop_tools)
-        self.bind("<Escape>", lambda _event: editor.close_crop_tools())
         photo = editor.selected_photo()
         ctk.CTkLabel(self, text=f"Photo #{photo.number:04d} — crop / orientation",
                      font=ctk.CTkFont(weight="bold")).pack(pady=(12, 6))
@@ -1048,9 +1077,10 @@ class CropTools(ctk.CTkToplevel):
         ctk.CTkButton(self, text="Flip horizontally", command=editor.flip).pack(pady=4)
         ctk.CTkButton(self, text="Close", fg_color="#3c444e",
                       command=editor.close_crop_tools).pack(pady=(8, 4))
+        self._install_escape(editor.close_crop_tools)
 
 
-class BackgroundTools(ctk.CTkToplevel):
+class BackgroundTools(_EscapeClosableTool):
     """Non-modal so the user can paint directly on the canvas behind it."""
     def __init__(self, editor: EditorWindow):
         super().__init__(editor)
@@ -1061,7 +1091,6 @@ class BackgroundTools(ctk.CTkToplevel):
         self.transient(editor)
         self.configure(fg_color="#25282d")
         self.protocol("WM_DELETE_WINDOW", editor.close_background_tools)
-        self.bind("<Escape>", lambda _event: editor.close_background_tools())
         photo = editor.selected_photo()
         ctk.CTkLabel(self, text=f"Photo #{photo.number:04d} — background",
                      font=ctk.CTkFont(weight="bold")).pack(pady=(12, 6))
@@ -1090,6 +1119,7 @@ class BackgroundTools(ctk.CTkToplevel):
                      text_color="#b3bdc9", justify="center").pack(pady=(0, 5))
         ctk.CTkButton(self, text="Close tool", width=120, fg_color="#3c444e",
                       command=editor.close_background_tools).pack(pady=(0, 8))
+        self._install_escape(editor.close_background_tools)
 
     def choose_mode(self, mode: str):
         try:

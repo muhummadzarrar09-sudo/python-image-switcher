@@ -8,6 +8,7 @@ __pycache__/
 *.pyd
 *.egg-info/
 .venv/
+.venv-alpha/
 venv/
 *.log
 
@@ -29,3 +30,4 @@ tmp/
 
 # Assets generated
 Unselected files/
+ui-captures/

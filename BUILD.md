@@ -1,162 +1,45 @@
-# Build Guide - EXE + Setup Installer
+# Still-photo editor alpha 0.2.0-alpha.7
 
-## Prerequisites (Windows Recommended)
+This is an **unsigned, incomplete alpha**, not a production release. See [EDITOR_STATUS.md](EDITOR_STATUS.md) for supported features and blocked fidelity/ownership workflows. The editor installer packages the standalone editor, not the older converter.
 
-- Python 3.9+ (3.11 recommended)
-- Git
-- Windows 10/11 for EXE build (Linux/Mac can build but installer is Windows)
+## Update and install in an existing Windows 11 checkout
 
-## Step 1: Install Dependencies
+Open PowerShell in the checkout directory after switching to the alpha branch:
 
-```bash
-pip install -r requirements.txt
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\update-alpha.ps1
 ```
 
-For full format support:
-```bash
-pip install pillow-heif pillow-avif-plugin PyMuPDF cairosvg customtkinter
+The script finds/installs Python 3.11 when missing, creates/updates the ignored `.venv`, verifies dependencies and tests, **best-effort installs the optional OpenCL Python runtime** (CPU fallback if unavailable), builds the windowed executable, locates/installs Inno Setup 6 and compiles the unsigned alpha setup. **If the editor is already installed, close it first:** the script detects the existing executable, performs a quiet **in-place update** using the stable Inno AppId and previous installation path, then smoke-tests the updated executable. It does not create a second app or intentionally remove photos, exports or sessions. Before an in-place update, it SHA-256-verifies a snapshot of any `.isphoto`/`.isbatch` files **inside the installation directory** to `%LOCALAPPDATA%\Image Switcher\UpdateBackups\pre-update-...` (outside the install tree), and stops before setup if that copy fails. Files stored elsewhere are not scanned or duplicated; keep your own backups of originals/projects in their chosen storage locations. Only a first-time setup launches the interactive wizard; **finish that wizard**. The updater now verifies the installed executable after either path and prints its actual location. A built `dist\ImageSwitcherEditor\ImageSwitcherEditor.exe` is not an installed app. The updater stops on failures and never switches your Git branch. Missing dependencies/tools require network access; the alpha is unsigned.
+
+To install dependencies and run tests **without building or installing** the desktop app:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\update-alpha.ps1 -DependenciesOnly
 ```
 
-## Step 2: Run App (Dev)
+If `winget` is unavailable, install Python 3.11 and Inno Setup 6 using their official installers first. On Linux/macOS, `python3.11 scripts/update_alpha.py` sets up and tests Python dependencies but cannot build/install the Windows app. You can also download the unsigned setup from the successful Windows alpha workflow artifact rather than build locally.
 
-```bash
-python src/app.py
-# or
-python main.py
+### Manual Windows steps (if you do not use the updater)
+
+```powershell
+py -3.11 scripts/update_alpha.py
+.\.venv\Scripts\python.exe build_editor.py
+.\dist\ImageSwitcherEditor\ImageSwitcherEditor.exe --editor-self-test
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer.iss
+.\dist\ImageSwitcher-Setup-0.2.0-alpha.7.exe
 ```
 
-## Step 3: Build EXE with PyInstaller
+The setup is unsigned and can show an unknown-publisher warning; proceed only if you trust this checkout. Alpha.7 probes GPU readiness in the background at boot; OpenCL is bundled when the optional wheel is installed during the build, but a CPU-only or unsupported-driver PC still starts on CPU. GPU may run eligible 8-bit RGB exposure/contrast previews **and full-resolution batch-export color math**, after a per-recipe exhaustive 8-bit pixel check. NEF, other filters and lossless file encoding still use CPU. The user's installed alpha.7 has now passed a generated full-resolution RTX 4070 exposure/contrast export and CPU-pixel comparison; other recipes, NEF and large diverse camera batches still need validation. The GPU status label reports readiness or CPU fallback. Set `IMAGE_SWITCHER_GPU=off` before launch only to troubleshoot drivers.
 
-### Option A: OneFile (single EXE, easy to share)
-```bash
-python build_exe.py --onefile
-```
-Output: `dist/ImageSwitcher.exe` (~80-120 MB, includes all deps)
+To confirm **the installed executable**, not the source probe, after completing the alpha.7 update/setup, run from the checkout in PowerShell (no photo needed):
 
-### Option B: OneDir (folder, fast startup)
-```bash
-python build_exe.py --onedir
-```
-Output: `dist/ImageSwitcher/ImageSwitcher.exe` + dependencies folder
-
-### Manual PyInstaller (if script fails)
-
-```bash
-pyinstaller --onefile --windowed --name=ImageSwitcher --icon=assets/icon.ico --add-data="assets;assets" --collect-all=customtkinter --collect-all=cairosvg --hidden-import=PIL --hidden-import=cairosvg --hidden-import=pillow_heif --hidden-import=fitz src/app.py
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\update-alpha.ps1 -GpuReport
 ```
 
-### Troubleshooting Build
+The `-GpuReport` option **does not rebuild or reinstall**. It finds the installed executable through its default folder or the Inno uninstall registration for custom install locations, prints the path it actually used, and writes `ui-captures\installed-gpu-report.json`. If no installed executable is found, it stops with an explanation; it will not mislabel the packaged `dist` build as an installed app. You can choose a report location with `-ReportPath 'C:\path\report.json'`. The report uses a generated 512×256 preview and a separate generated 2400×1600 numbered lossless export (crossing multiple GPU transfer tiles). It records `gpu_status`, which numbered export actually used GPU color math, and CPU pixel comparisons. It never reads your camera roll. The default output directory is ignored by Git. CPU-only Windows CI verifies the *packaged* diagnostic and fallback; the user's installed RTX 4070 report confirms GPU use and pixel parity for its generated recipe only. The Windows workflow builds the setup, installs it on its disposable runner, runs the updater against that existing install, smoke-tests the updated executable and uninstalls it. That is **not** proof of GUI functionality, camera compatibility, or clean Windows 11 installation. The app cannot be remotely installed on your personal PC from this sandbox.
 
-- **Missing tkinter**: On Linux, `sudo apt install python3-tk`
-- **Missing cairo**: On Windows, cairosvg bundles needed DLLs via PyInstaller. If fails, install GTK runtime: https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer
-- **libpython not found (Linux)**: `sudo apt install libpython3.11`
-- **Large EXE**: Normal, includes Pillow, CustomTkinter, Cairo, etc. Use UPX to compress: download UPX and add `--upx-dir=/path/to/upx`
+## Legacy converter (separate)
 
-## Step 4: Build Setup Installer (Windows Setup.exe)
-
-This creates a professional installer like any real Windows app.
-
-1. Install **Inno Setup 6**: https://jrsoftware.org/download.php/is.exe
-2. (Optional) Install Inno Setup VSCode extension
-3. Compile:
-
-**Via GUI:**
-- Open `installer.iss` in Inno Setup Compiler
-- Click Build → Compile
-- Output: `dist/ImageSwitcher-Setup-1.0.0.exe`
-
-**Via Command Line (if iscc in PATH):**
-```bash
-iscc installer.iss
-```
-
-**What the installer does:**
-- Shows welcome, license (LICENSE.txt)
-- Asks install dir (default Program Files)
-- Copies EXE or folder
-- Creates Start Menu shortcut
-- Optional Desktop icon
-- Creates uninstaller in Control Panel
-- Optional: associate image formats
-
-### Customizing installer.iss
-
-Edit these lines in `installer.iss`:
-```
-#define MyAppVersion "1.0.0"  ; change version
-#define MyAppPublisher "Your Name"
-OutputBaseFilename=ImageSwitcher-Setup-{#MyAppVersion}
-```
-
-Add more file associations in [Tasks] and [Registry] sections if needed.
-
-## Step 5: Distribute
-
-You now have:
-- `dist/ImageSwitcher.exe` - portable, no install needed, just run
-- `dist/ImageSwitcher-Setup-1.0.0.exe` - full installer, professional
-
-Share either. Setup is recommended for end users.
-
-## Linux / Mac Build
-
-Same PyInstaller command works, produces:
-- Linux: `dist/ImageSwitcher` (binary)
-- Mac: `dist/ImageSwitcher.app` (use --windowed --onedir for .app bundle)
-
-For Mac DMG installer:
-```bash
-# Install create-dmg
-brew install create-dmg
-create-dmg --volname "Image Switcher" --window-pos 200 120 --window-size 600 400 --icon-size 100 --app-drop-link 425 120 dist/ImageSwitcher.dmg dist/ImageSwitcher.app
-```
-
-## CI/CD (GitHub Actions)
-
-Example workflow to auto-build EXE on push:
-
-```yaml
-name: Build EXE
-on: [push]
-jobs:
-  build:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with: {python-version: '3.11'}
-      - run: pip install -r requirements.txt pyinstaller
-      - run: python build_exe.py --onefile
-      - uses: actions/upload-artifact@v3
-        with: {name: exe, path: dist/}
-```
-
-## Testing the EXE
-
-1. Run `dist/ImageSwitcher.exe` on a clean Windows VM (no Python installed) to ensure it works standalone
-2. Test conversions:
-   - PNG → JPG (alpha handling)
-   - SVG → PNG (rasterization)
-   - PNG → SVG (embedding)
-   - WEBP → AVIF (modern)
-3. Check viewer shows old vs new
-4. Test searchable dropdown: type "trans" should show PNG, WEBP, SVG, etc.
-
-## Size Optimization (Optional)
-
-- Use `--exclude-module` for unused formats if you want smaller EXE (but we want ALL formats)
-- Use UPX compression
-- Use `pip install pyinstaller[encryption]` for bytecode encryption
-
-## Final Checklist Before Release
-
-- [ ] App runs via `python src/app.py`
-- [ ] `python src/cli.py list` shows 38+ formats
-- [ ] `python src/cli.py gate png jpeg` shows yellow with warnings
-- [ ] EXE builds and runs on clean Windows
-- [ ] Setup installer builds and installs/uninstalls correctly
-- [ ] Icons show correctly
-- [ ] Viewer shows old and new images
-- [ ] Search inside dropdown works
-
-You are done! You have a COMPLETE app, not just a script.
+`python src/app.py` runs the original converter and can open the editor. `python build_exe.py --onedir` packages the older converter only. `installer.iss` packages `dist\ImageSwitcherEditor`, produced by `build_editor.py`.

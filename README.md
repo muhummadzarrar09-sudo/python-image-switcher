@@ -1,10 +1,17 @@
 # 🖼️ Python Image Switcher - Universal Image Converter
 
-> **Convert ANY image type to ANOTHER image type** with searchable dropdown, acceptance gate for EVERY format, dual viewer (old vs new), SVG raster/vector support, and real EXE installer.
+> **Still-photo editor alpha 0.2.0-alpha.7:** numbered batch editing, protected hand edits, camera MPO-in-JPG stills, import progress, canvas-sized background previews and bounded import/numbered-rail memory and guarded GPU exposure/contrast preview + batch-export math when supported (NEF/other edits remain CPU),
+> lossless PNG/TIFF masters and portable `.isphoto` copies are under development.
+> See [EDITOR_STATUS.md](EDITOR_STATUS.md) for exact capabilities, missing signed
+> credentials/ownership features, Windows 11 release gates, and the [Windows alpha updater](BUILD.md). The converter
+> documentation below describes the older, separate workflow and is **not**
+> evidence of a finished or installed photo editor.
+
+> Legacy converter workflow: format dropdown, acceptance gate and dual viewer. Format support varies by decoder and installed dependencies. The editor installer is a separate, unverified development preview.
 
 ![Version](https://img.shields.io/badge/version-1.0.0-green)
 ![Formats](https://img.shields.io/badge/formats-50%2B-blue)
-![Python](https://img.shields.io/badge/python-3.9%2B-yellow)
+![Python](https://img.shields.io/badge/python-3.10%2B-yellow)
 
 ---
 

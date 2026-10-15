@@ -1,6 +1,10 @@
 # Core
 customtkinter>=5.2.0
 Pillow>=10.0.0
+# Still-photo batch editor (16-bit NEF decode and TIFF masters)
+numpy>=1.26.0
+rawpy>=0.21.0
+tifffile>=2024.1.0
 # SVG rasterization (vector -> raster)
 cairosvg>=2.7.0
 # Modern formats

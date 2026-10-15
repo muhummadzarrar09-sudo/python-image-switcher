@@ -1,0 +1,157 @@
+name: Windows still-photo editor alpha
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - arena/a3458c15-python-image-switcher
+
+jobs:
+  windows-alpha:
+    runs-on: windows-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Regression-test missing Python runtime detection
+        shell: powershell
+        run: .\update-alpha.ps1 -ProbeTest
+      - name: Install alpha dependencies and verify via updater
+        shell: powershell
+        run: .\update-alpha.ps1 -DependenciesOnly
+      - name: Smoke-test real desktop controls and export dialog
+        shell: pwsh
+        run: |
+          & .\.venv\Scripts\python.exe -m pytest -q tests/test_editor_window.py tests/test_editor_window_geometry.py tests/test_editor_import.py tests/test_editor_preview.py tests/test_capture_editor_baseline.py *> gui-test.log
+          if ($LASTEXITCODE -ne 0) {
+            $tail = (Get-Content gui-test.log -Tail 75) -join '%0A'
+            Write-Host "::error file=tests/test_editor_window.py,line=1::$tail"
+            exit 1
+          }
+          Get-Content gui-test.log -Tail 8
+      - name: Profile full-resolution CPU rendering and memory (diagnostic)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ui-captures\runner | Out-Null
+          & .\.venv\Scripts\python.exe scripts\benchmark_editor.py --size 2400x1600 | Tee-Object -FilePath ui-captures\runner\benchmark.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Capture Windows UI smoke states (AI test fixture, not approved baselines)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ui-captures\runner | Out-Null
+          # Hosted runner exposes only 1024x720 usable pixels. These are
+          # *runner-fitting smoke captures*, not the 1456x766 user baseline.
+          & .\.venv\Scripts\python.exe scripts\capture_editor_baseline.py --window 960x640 --expected-dpi 96 --output ui-captures\runner --wait-ms 500 *> ui-captures\runner\capture.log
+          if ($LASTEXITCODE -ne 0) {
+            $tail = (Get-Content ui-captures\runner\capture.log -Tail 28) -join '%0A'
+            Write-Host "::error file=scripts/capture_editor_baseline.py,line=1::$tail"
+            exit 1
+          }
+          & .\.venv\Scripts\python.exe scripts\ui_review.py ui-captures\runner --expected-dpi 96
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force ui-captures\runner\narrow | Out-Null
+          & .\.venv\Scripts\python.exe scripts\capture_editor_baseline.py --window 980x650 --expected-dpi 96 --output ui-captures\runner\narrow --wait-ms 500 *> ui-captures\runner\narrow\capture.log
+          if ($LASTEXITCODE -ne 0) {
+            $tail = (Get-Content ui-captures\runner\narrow\capture.log -Tail 28) -join '%0A'
+            Write-Host "::error file=scripts/capture_editor_baseline.py,line=1::$tail"
+            exit 1
+          }
+          & .\.venv\Scripts\python.exe scripts\ui_review.py ui-captures\runner\narrow --expected-dpi 96
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Profile generated 421-photo import and peak RAM (diagnostic)
+        shell: pwsh
+        run: |
+          & .\.venv\Scripts\python.exe scripts\benchmark_large_batch.py --count 421 | Tee-Object -FilePath ui-captures\runner\large-batch.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-ui-smoke-captures
+          path: ui-captures/runner/
+          if-no-files-found: warn
+      - name: Build windowed alpha executable
+        run: |
+          .\.venv\Scripts\python.exe build_editor.py 2>&1 | Tee-Object -FilePath build-output.txt
+          if ($LASTEXITCODE -ne 0) {
+            $tail = (Get-Content build-output.txt -Tail 28) -join '%0A'
+            Write-Host "::error file=build_editor.py,line=1::$tail"
+            exit 1
+          }
+      - name: Smoke-test packaged editor without UI
+        run: |
+          $exe = Resolve-Path '.\dist\ImageSwitcherEditor\ImageSwitcherEditor.exe'
+          $process = Start-Process -FilePath $exe -ArgumentList '--editor-self-test' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Packaged editor smoke test failed: $($process.ExitCode)" }
+      - name: Install Inno Setup on runner
+        run: choco install innosetup --no-progress -y
+      - name: Build unsigned alpha installer
+        run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer.iss'
+      - name: Install, smoke-test and uninstall alpha on the Windows runner
+        run: |
+          trap {
+            Write-Host "::error file=installer.iss,line=1::$($_.Exception.Message)"
+            exit 1
+          }
+          $setup = Resolve-Path '.\dist\ImageSwitcher-Setup-0.2.0-alpha.7.exe'
+          $process = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/NORESTART', '/SUPPRESSMSGBOXES') -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Setup failed: $($process.ExitCode)" }
+          $directory = Join-Path $env:LOCALAPPDATA 'Programs\Image Switcher'
+          $editor = Join-Path $directory 'ImageSwitcherEditor.exe'
+          if (-not (Test-Path $editor)) { throw "Installed editor not found: $editor" }
+          # Synthetic user saves placed *inside* the install tree verify that
+          # the real updater snapshots them outside it before silent setup.
+          $testProject = Join-Path $directory 'ci-user.isphoto'
+          $testSession = Join-Path $directory 'ci-user.isbatch'
+          Set-Content -LiteralPath $testProject -Value 'synthetic project bytes'
+          Set-Content -LiteralPath $testSession -Value 'synthetic session bytes'
+          $projectHash = (Get-FileHash -LiteralPath $testProject -Algorithm SHA256).Hash
+          $sessionHash = (Get-FileHash -LiteralPath $testSession -Algorithm SHA256).Hash
+          # Exercise the actual updater's existing-installation branch; it must
+          # update in place rather than launching another first-install wizard.
+          & .\update-alpha.ps1
+          if ($LASTEXITCODE -ne 0) { throw "In-place updater failed: $LASTEXITCODE" }
+          if (-not (Test-Path $editor)) { throw "Updated editor moved or disappeared: $editor" }
+          $backupRoot = Join-Path $env:LOCALAPPDATA 'Image Switcher\UpdateBackups'
+          $snapshot = Get-ChildItem -LiteralPath $backupRoot -Directory |
+                      Sort-Object CreationTimeUtc -Descending | Select-Object -First 1
+          if (-not $snapshot) { throw 'Pre-update backup of synthetic project/session was not created' }
+          foreach ($pair in @(@('ci-user.isphoto', $projectHash), @('ci-user.isbatch', $sessionHash))) {
+            $original = Join-Path $directory $pair[0]
+            $saved = Join-Path $snapshot.FullName $pair[0]
+            if (-not (Test-Path -LiteralPath $saved) -or
+                (Get-FileHash -LiteralPath $saved -Algorithm SHA256).Hash -ne $pair[1] -or
+                (Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash -ne $pair[1]) {
+              throw "Update changed or failed to snapshot user data: $($pair[0])"
+            }
+          }
+          Remove-Item -LiteralPath $testProject, $testSession -Force
+          $process = Start-Process -FilePath $editor -ArgumentList '--editor-self-test' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installed editor smoke test failed: $($process.ExitCode)" }
+          $report = Join-Path (Resolve-Path 'ui-captures\runner').Path 'installed-gpu-report.json'
+          # Use the same installed-path lookup that the user runs; it supports
+          # both the default folder and a custom Inno Setup install location.
+          & .\update-alpha.ps1 -GpuReport -ReportPath $report
+          if ($LASTEXITCODE -ne 0) { throw "Installed GPU/CPU-fallback diagnostic failed: $LASTEXITCODE" }
+          $diagnostic = Get-Content $report -Raw | ConvertFrom-Json
+          if (-not $diagnostic.packaged -or $diagnostic.max_channel_difference -ne 0 -or
+              $diagnostic.export_max_channel_difference -ne 0 -or
+              $diagnostic.exported_png_max_channel_difference -ne 0) {
+            throw 'Packaged preview/export/fallback parity check failed'
+          }
+          $uninstaller = Join-Path $directory 'unins000.exe'
+          if (-not (Test-Path $uninstaller)) { throw "Uninstaller not found: $uninstaller" }
+          $process = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT', '/NORESTART') -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Uninstall failed: $($process.ExitCode)" }
+          if (Test-Path $editor) { throw "Installed editor remained after uninstall: $editor" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: installed-gpu-fallback-diagnostic
+          path: ui-captures/runner/installed-gpu-report.json
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-switcher-alpha-0.2.0-alpha.7-unsigned
+          path: dist/ImageSwitcher-Setup-0.2.0-alpha.7.exe
+          if-no-files-found: error

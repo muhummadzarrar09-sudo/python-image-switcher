@@ -7,7 +7,7 @@ name = "python-image-switcher"
 version = "1.0.0"
 description = "Universal Image Converter - Convert ANY image type to ANY other with searchable dropdown, acceptance gate, dual viewer, SVG support, EXE installer"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "Image Switcher Team"}
@@ -15,6 +15,9 @@ authors = [
 dependencies = [
     "customtkinter>=5.2.0",
     "Pillow>=10.0.0",
+    "numpy>=1.26.0",
+    "rawpy>=0.21.0",
+    "tifffile>=2024.1.0",
     "cairosvg>=2.7.0",
     "pillow-heif>=0.14.0",
     "PyMuPDF>=1.23.0",

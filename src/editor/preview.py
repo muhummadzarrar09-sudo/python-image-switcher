@@ -1,0 +1,170 @@
+"""Coalesced, size-bounded preview rendering with no Tk calls off the UI thread.
+
+Only UI previews use this worker. Export still uses the original full-resolution
+render and its own verified lossless save path.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+import os
+from pathlib import Path
+from queue import Empty, Full, Queue
+import threading
+
+import numpy as np
+from PIL import Image
+
+from .batch import BatchSession, Photo
+from .gpu_preview import OpenCLPreview, eligible
+from .render import _open_source, render
+
+
+def preview_label(source: str, before: bool) -> str:
+    """Avoid claiming a NEF's embedded camera JPEG is the full RAW master."""
+    if Path(source).suffix.lower() == ".nef":
+        return ("NEF source preview" if before else "NEF edited preview") + " · may use camera JPEG"
+    return "Source preview" if before else "Edited preview"
+
+
+def mask_point(bounds: tuple[int, int, int, int], x: int, y: int) -> tuple[float, float] | None:
+    """Map Tk canvas coordinates into the *displayed* image, not the canvas.
+
+    Tk's widget bounds and event coordinates share the same scaling; do not
+    apply another DPI multiplier. Outside the photo matte must never paint.
+    """
+    left, top, width, height = bounds
+    if width <= 0 or height <= 0 or not (left <= x < left + width and top <= y < top + height):
+        return None
+    return ((x - left) / width, (y - top) / height)
+
+
+@dataclass(frozen=True)
+class PreviewRequest:
+    generation: int
+    photo: Photo
+    batch: BatchSession
+    before: bool
+    size: tuple[int, int]
+
+
+def process_preview(request: PreviewRequest, accelerator: OpenCLPreview | None = None) -> Image.Image:
+    """Return a small display image; never edit, save or demote the source."""
+    if request.before:
+        image, _, _ = _open_source(request.photo.source, preview=True,
+                                   frame_index=request.photo.frame_index, preview_size=request.size)
+    else:
+        image = None
+        if accelerator is not None and not getattr(accelerator, "failed", False) and eligible(request.photo, request.batch):
+            source, _, raw = _open_source(request.photo.source, preview=True,
+                                          frame_index=request.photo.frame_index,
+                                          preview_size=request.size)
+            if not raw and isinstance(source, Image.Image) and source.mode == "RGB":
+                values = request.batch.effective_settings(request.photo.number)
+                try:
+                    image = accelerator.apply(source, values["exposure"], values["contrast"])
+                except Exception as exc:
+                    # Driver failures are recoverable for previews; disable the
+                    # backend for this worker and re-render on the known CPU path.
+                    accelerator.failed = True
+                    accelerator.error = str(exc)
+        if image is None:
+            image, _, _ = render(request.photo, request.batch, preview=True,
+                                 preview_size=request.size)
+    if not isinstance(image, Image.Image):
+        # Some NEF files have no embedded JPEG; their uint16 demosaic is still
+        # displayed as 8-bit, while full-resolution TIFF export stays uint16.
+        image = Image.fromarray(np.right_shift(image, 8).astype(np.uint8))
+    image.thumbnail(request.size, Image.Resampling.LANCZOS)
+    return image
+
+
+class PreviewRenderer:
+    """Single worker, at most one pending request and one completed image."""
+
+    def __init__(self, processor=process_preview):
+        self._processor = processor
+        self._pending: Queue[PreviewRequest | None] = Queue(maxsize=1)
+        self._completed: Queue[tuple[int, Image.Image | None, str | None, bool]] = Queue(maxsize=1)
+        self._stop = threading.Event()
+        self._latest = 0
+        # Auto-probe at application boot, without waiting on the UI or preview
+        # worker. CPU-only machines work unchanged; IMAGE_SWITCHER_GPU=off is
+        # an explicit opt-out for driver troubleshooting.
+        self._gpu_auto = os.environ.get("IMAGE_SWITCHER_GPU", "auto").lower() != "off"
+        self._gpu_backend: OpenCLPreview | None = None
+        self._gpu_disabled = not self._gpu_auto
+        self.gpu_error: str | None = None
+        self.gpu_status = "checking" if self._gpu_auto else "CPU (GPU off)"
+        self._worker = threading.Thread(target=self._run, name="editor-preview", daemon=True)
+        self._worker.start()
+        if self._gpu_auto and self._processor is process_preview:
+            threading.Thread(target=self._prepare_gpu, name="editor-gpu-startup", daemon=True).start()
+        elif self._processor is not process_preview:
+            self.gpu_status = "CPU (custom renderer)"
+
+    def _prepare_gpu(self) -> None:
+        try:
+            backend = OpenCLPreview()
+        except Exception as exc:
+            self.gpu_error = str(exc)
+            self._gpu_disabled = True
+            self.gpu_status = "CPU fallback (GPU unavailable)"
+        else:
+            if not self._stop.is_set():
+                self._gpu_backend = backend
+                self.gpu_status = f"GPU ready: {backend.device_name}"
+
+    def submit(self, request: PreviewRequest) -> None:
+        if self._stop.is_set():
+            return
+        self._latest = request.generation
+        self._replace(self._pending, request)
+
+    @staticmethod
+    def _replace(queue: Queue, item) -> None:
+        try:
+            queue.put_nowait(item)
+        except Full:
+            try:
+                queue.get_nowait()
+            except Empty:
+                pass
+            queue.put_nowait(item)
+
+    def result(self) -> tuple[int, Image.Image | None, str | None, bool] | None:
+        try:
+            return self._completed.get_nowait()
+        except Empty:
+            return None
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            request = self._pending.get()
+            if request is None or self._stop.is_set():
+                break
+            if request.generation != self._latest:
+                continue
+            try:
+                gpu_used = False
+                backend = self._gpu_backend
+                if (self._processor is process_preview and backend is not None
+                        and not self._gpu_disabled and not request.before
+                        and eligible(request.photo, request.batch)):
+                    previous_calls = backend.calls
+                    image = process_preview(request, accelerator=backend)
+                    gpu_used = backend.calls > previous_calls
+                    if getattr(backend, "failed", False):
+                        self.gpu_error = backend.error
+                        self._gpu_disabled = True
+                        self.gpu_status = "CPU fallback (GPU error)"
+                else:
+                    image = self._processor(request)
+                error = None
+            except Exception as exc:
+                image, error, gpu_used = None, str(exc), False
+            if request.generation == self._latest and not self._stop.is_set():
+                self._replace(self._completed, (request.generation, image, error, gpu_used))
+
+    def close(self) -> None:
+        self._stop.set()
+        self._replace(self._pending, None)

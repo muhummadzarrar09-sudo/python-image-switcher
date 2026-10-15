@@ -1,0 +1,217 @@
+"""Audit actual Windows editor captures without treating an AI fixture as approval.
+
+This checks reproducibility and measurable panel geometry. It deliberately does
+NOT compare pixels to the AI concept or call any capture an approved baseline.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+from PIL import Image
+
+STATES = ("empty-editor", "populated-editor", "missing-source", "protected-batch", "crop-tools",
+          "background-tools", "background-before", "background-rejected",
+          "background-ready", "export-overlay")
+
+# These are actual foreground/surface pairs from the current implementation,
+# not targets copied from an AI illustration. Large text >= 3:1 is not used to
+# waive the ordinary 4.5:1 threshold for these small UI captions.
+TEXT_PAIRS = {
+    "footer hint": ("#858e9b", "#1b1e23"),
+    "footer status": ("#aab0b9", "#1b1e23"),
+    "adjustment heading": ("#c9ced7", "#21252b"),
+    "photo caption": ("#abb3bd", "#282c32"),
+    "protected caption": ("#8dc0ff", "#23446b"),
+    "mask warning": ("#d2b889", "#25282d"),
+    "export hint": ("#939ca8", "#25282d"),
+    "export error": ("#ffc188", "#25282d"),
+}
+
+
+def relative_luminance(hex_color: str) -> float:
+    channels = [int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+    linear = [v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in channels]
+    return sum(a * b for a, b in zip(linear, (0.2126, 0.7152, 0.0722)))
+
+
+def contrast_ratio(foreground: str, background: str) -> float:
+    lighter, darker = sorted((relative_luminance(foreground), relative_luminance(background)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def within(inner: dict, outer: dict, tolerance: int = 3) -> bool:
+    return (inner["width"] > 0 and inner["height"] > 0
+            and outer["x"] - tolerance <= inner["x"]
+            and outer["y"] - tolerance <= inner["y"]
+            and inner["x"] + inner["width"] <= outer["x"] + outer["width"] + tolerance
+            and inner["y"] + inner["height"] <= outer["y"] + outer["height"] + tolerance)
+
+
+def audit_capture(directory: Path, expected_dpi: int | None = None) -> dict:
+    meta = json.loads((directory / "capture.json").read_text(encoding="utf-8"))
+    checks: list[dict] = []
+
+    def check(name: str, condition: bool) -> None:
+        checks.append({"check": name, "passed": bool(condition)})
+
+    check("No capture script error", not meta.get("error"))
+    captured_expectation = meta.get("expected_dpi_for_window")
+    if captured_expectation is not None:
+        check(f"Capture window DPI matches required {captured_expectation}",
+              meta.get("dpi_for_window") == captured_expectation)
+    if expected_dpi is not None:
+        check(f"Window DPI matches expected {expected_dpi}", meta.get("dpi_for_window") == expected_dpi)
+    check("All expected states captured", set(STATES) <= set(meta["states"]))
+    measures: dict = {}
+    for name in STATES:
+        state = meta["states"].get(name)
+        if state is None:
+            continue
+        file = directory / f"{name}.png"
+        if not file.is_file():
+            check(f"{name} screenshot exists", False)
+            continue
+        with Image.open(file) as screenshot:
+            pixels = screenshot.size
+            screenshot.verify()
+        client = state["editor_client"]
+        check(f"{name} screenshot matches measured client", list(pixels) == state["image_pixels"]
+              and all(abs(a - b) <= 3 for a, b in zip(pixels, (client["width"], client["height"]))))
+        for section in ("header", "sidebar", "workspace"):
+            check(f"{name} {section} inside client", within(state[section], client))
+        panel = state["panel"]
+        if "panel_content" in state:
+            check(f"{name} panel inside client", within(panel, client))
+            viewport = state["panel_scroll_viewport"]
+            check(f"{name} adjustment viewport inside panel", within(viewport, panel))
+            check(f"{name} adjustment content fits viewport width",
+                  state["panel_content"]["width"] <= viewport["width"] + 3)
+            if state["panel_content"]["height"] > viewport["height"] + 3:
+                check(f"{name} overflowing adjustments can scroll",
+                      len(state.get("panel_yview", [])) == 2
+                      and state["panel_yview"][1] < .995)
+        else:
+            # Pre-fix captures called the CTkScrollableFrame's virtual content
+            # the panel. Its height can legitimately exceed the client; only
+            # horizontal placement can be assessed without viewport metadata.
+            check(f"{name} legacy panel horizontal bounds inside client",
+                  panel["width"] > 0 and client["x"] - 3 <= panel["x"]
+                  and panel["x"] + panel["width"] <= client["x"] + client["width"] + 3)
+        if "header_actions" in state:
+            check(f"{name} header actions are visible", len(state["header_actions"]) >= 8
+                  and all(action["width"] >= 30 and within(action, state["header"], tolerance=2)
+                          for action in state["header_actions"]))
+        check(f"{name} canvas inside workspace", within(state["canvas"], state["workspace"]))
+        sidebar, workspace, panel = (state[key] for key in ("sidebar", "workspace", "panel"))
+        check(f"{name} three-panel order", sidebar["x"] < workspace["x"] < panel["x"]
+              and sidebar["x"] + sidebar["width"] <= workspace["x"] + 3
+              and workspace["x"] + workspace["width"] <= panel["x"] + 3)
+        popup = state.get("popup")
+        if popup:
+            popup_file = directory / f"{name}-popup.png"
+            if popup_file.is_file():
+                with Image.open(popup_file) as screenshot:
+                    popup_pixels = screenshot.size
+                    screenshot.verify()
+                check(f"{name} popup screenshot matches bounds", list(popup_pixels) ==
+                      [popup["width"], popup["height"]])
+            else:
+                check(f"{name} popup screenshot exists", False)
+        measures[name] = {"client_pixels": list(pixels),
+                          "rail_width": sidebar["width"], "workspace_width": workspace["width"],
+                          "adjustments_width": panel["width"],
+                          "adjustments_viewport_height": (state["panel_scroll_viewport"]["height"]
+                                                          if "panel_scroll_viewport" in state else None),
+                          "adjustments_content_height": (state["panel_content"]["height"]
+                                                         if "panel_content" in state else None),
+                          "header_height": state["header"]["height"],
+                          "canvas_inset_left": state["canvas"]["x"] - workspace["x"],
+                          "popup_pixels": ([popup["width"], popup["height"]] if popup else None)}
+    states = meta["states"]
+    check("Visible adjustment viewport measured",
+          bool(states) and all("panel_content" in s and "panel_scroll_viewport" in s
+                               for s in states.values()))
+    requested = meta.get("requested_window", {})
+    check("Requested physical client size is actually honored",
+          bool(states) and all(
+              abs(state["editor_client"][axis] - requested.get(axis, -100000)) <= 3
+              for state in states.values() for axis in ("width", "height")))
+    work_area = meta.get("monitor_work_area")
+    if meta.get("monitor_probe_attempted"):
+        check("Monitor working area probe succeeded", work_area is not None)
+    if work_area is not None:
+        check("Editor remains inside monitor working area",
+              all(within(state["editor_client"], work_area, tolerance=3)
+                  for state in states.values()))
+        check("Popups remain inside monitor working area",
+              all(within(state["popup"], work_area, tolerance=3)
+                  for state in states.values() if state.get("popup")))
+    check("Empty state has no selected photo", states.get("empty-editor", {}).get("selected_number") is None)
+    check("Fixture has stable selected #0001", states.get("populated-editor", {}).get("selected_number") == 1)
+    check("Missing source is a separate numbered correctable state",
+          states.get("missing-source", {}).get("selected_number") == 3
+          and states.get("missing-source", {}).get("source_missing") is True)
+    check("Protected photo stays numbered", 1 in states.get("protected-batch", {}).get("protected_numbers", []))
+    check("Before disarms manual mask", "Select After" in states.get("background-before", {}).get("mask_status", ""))
+    check("Undersized image rejected without effect", "upscaled" in meta.get("background_rejection", "")
+          and states.get("background-rejected", {}).get("background_mode") == "none")
+    check("After with effect arms manual mask", states.get("background-ready", {}).get("background_mode") == "color"
+          and "Mask ready" in states.get("background-ready", {}).get("mask_status", ""))
+    check("Export stays in separate popup", bool(states.get("export-overlay", {}).get("popup")))
+    contrast = {name: round(contrast_ratio(*pair), 2) for name, pair in TEXT_PAIRS.items()}
+    for name, ratio in contrast.items():
+        check(f"{name} small-text contrast >= 4.5:1", ratio >= 4.5)
+    return {"passed": all(item["passed"] for item in checks),
+            "fixture_only": meta.get("fixture_only"),
+            "approved_reference": False,
+            "note": "Geometry/fixture smoke checks only. Older captures do not measure the visible scrollable panel viewport. User-approved reference and physical visibility review still required.",
+            "capture_dpi_for_window": meta.get("dpi_for_window"),
+            "expected_dpi_for_window": expected_dpi,
+            "capture_required_dpi_for_window": captured_expectation,
+            "requested_window": requested,
+            "monitor_work_area": work_area,
+            "screen_fit_verified": work_area is not None,
+            "header_actions_verified": bool(states) and all("header_actions" in s for s in states.values()),
+            "panel_viewport_verified": bool(states) and all("panel_content" in s and
+                                                            "panel_scroll_viewport" in s for s in states.values()),
+            "measured": measures, "contrast_of_current_tokens": contrast, "checks": checks}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("directory", type=Path, help="Folder containing capture.json and state PNGs")
+    parser.add_argument("--expected-dpi", type=int,
+                        help="Required effective GetDpiForWindow value: 96=100%%, 120=125%%, 144=150%%")
+    args = parser.parse_args()
+    if args.expected_dpi is not None and not 1 <= args.expected_dpi <= 960:
+        parser.error("--expected-dpi must be a positive DPI value up to 960")
+    report = audit_capture(args.directory, expected_dpi=args.expected_dpi)
+    (args.directory / "review.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    failed = [item["check"] for item in report["checks"] if not item["passed"]]
+    print(f"{len(report['checks']) - len(failed)}/{len(report['checks'])} capture/contrast checks passed; "
+          f"window DPI: {report['capture_dpi_for_window']}"
+          + (f" (required: {args.expected_dpi})" if args.expected_dpi is not None else " (not checked)")
+          + "; approved reference: no")
+    if failed:
+        requested = report["requested_window"]
+        measured = report["measured"].get("empty-editor", {}).get("client_pixels")
+        details = (f" Requested {requested.get('width')}x{requested.get('height')} physical pixels; "
+                   f"captured {measured}. Monitor work area: {report['monitor_work_area']}.")
+        if any("panel inside client" in item for item in failed):
+            first = json.loads((args.directory / "capture.json").read_text(encoding="utf-8"))["states"].get("empty-editor", {})
+            details += (f" Empty-state physical bounds: client={first.get('editor_client')}, "
+                        f"rail={first.get('sidebar')}, workspace={first.get('workspace')}, "
+                        f"panel={first.get('panel')}.")
+        message = "Failed: " + "; ".join(failed) + "." + details
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            # Artifact download uses GitHub's external blob host. Surface the
+            # exact failure in the GitHub API-visible annotation as well.
+            print("::error file=scripts/ui_review.py,line=1::" + message, file=sys.stderr)
+        parser.exit(1, message + "\n")
+
+
+if __name__ == "__main__":
+    main()

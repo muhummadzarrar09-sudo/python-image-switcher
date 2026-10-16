@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Tk desktop smoke test runs on Windows CI")
+# pytest.mark.skipif(sys.platform != "win32", reason="Tk desktop smoke test runs on Windows CI")
+# Removed for Windows-native test execution; all platforms can run GUI tests.
 
 
 def test_named_adjustment_sliders_and_export_dialog_do_not_write_early(tmp_path, tk_root):
